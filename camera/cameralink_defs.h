@@ -1,0 +1,4 @@
+#ifndef CAMERALINK_DEFS_H
+#define CAMERALINK_DEFS_H
+
+#endif // CAMERALINK_DEFS_H
