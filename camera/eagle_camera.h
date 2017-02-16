@@ -1,6 +1,9 @@
 #ifndef EAGLE_CAMERA_H
 #define EAGLE_CAMERA_H
 
+#if defined(_WIN32) || defined(__WIN32__) || defined(_WIN64)
+    #include <windows.h>
+#endif
 
 #include <string>
 

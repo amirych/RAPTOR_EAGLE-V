@@ -16,10 +16,12 @@ if (NOT "${XCLIB_INSTALL_DIR}" STREQUAL "${XCLIB_INSTALL_DIR_INTERNAL}")
   unset(XCLIB_INSTALL_DIR)
   unset(XCLIB_INSTALL_DIR_INTERNAL)
   find_path(XCLIB_INCLUDE_DIR NAMES xcliball.h PATHS ${XCLIB_INSTALL_DIR})
-  find_path(XCLIB_LIBRARY NAMES kxclib_x86_64 xclib_x86_64  libkxclib_x86_64.so libxclib_x86_64.so PATHS ${XCLIB_INSTALL_DIR})
+#  find_library(XCLIB_LIBRARY NAMES kxclib_x86_64 xclib_x86_64  libkxclib_x86_64.so libxclib_x86_64.so
+#                                   xclibw64 PATHS ${XCLIB_INSTALL_DIR})
+  find_library(XCLIB_LIBRARY NAMES kxclib_x86_64 xclib_x86_64 xclibw64 PATHS ${XCLIB_INSTALL_DIR})
 else() # try to find in system default paths
     find_path (XCLIB_INCLUDE_DIR xcliball.h)
-    find_library (XCLIB_LIBRARY NAMES kxclib_x86_64 xclib_x86_64)
+    find_library (XCLIB_LIBRARY NAMES kxclib_x86_64 xclib_x86_64 xclibw64)
 endif()
 
 find_package_handle_standard_args(XCLIB  DEFAULT_MSG
