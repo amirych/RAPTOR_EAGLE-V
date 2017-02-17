@@ -20,7 +20,8 @@ set (EAGLE_CAMERA_VERSION_MINOR 1)
 
 configure_file (
   "camera/eagle_camera_config.h.in"
-  "${PROJECT_BINARY_DIR}/eagle_camera_config.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/camera/eagle_camera_config.h"
+  #  "${PROJECT_BINARY_DIR}/eagle_camera_config.h"
   )
 
 set(EAGLE_CAMERA_LIB eagle_camera)
