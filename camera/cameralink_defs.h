@@ -61,18 +61,13 @@
 #define CL_TRIGGER_MODE_SNAPSHOT            0x1  // 0-th bit
 
 
-// extract TEC set point value (sourcePtr[0] - LSB 8-bit long part, sourcePtr[1] - MSB right 4-bits )
-
-#define CL_TEC_SET_POINT_GET_VALUE(sourcePtr) ( sourcePtr[0] + ((sourcePtr[1] & 0x0F) << 8) )
-#define CL_TEC_SET_POINT_SET_VALUE(value) ()
-
             /*  SETUP CONTROL VALUES */
 
 // shutter
 
-#define CL_SUTTER_CLOSED  0x0
-#define CL_SHUTTER_OPEN   0x1
-#define CL_SHUTTER_EXP    0x2
+#define CL_SHUTTER_CLOSED  0x0
+#define CL_SHUTTER_OPEN    0x1
+#define CL_SHUTTER_EXP     0x2
 
 // readout rate (registers vales)
 
@@ -87,7 +82,13 @@
 #define CL_READOUT_MODE_TEST    0x04
 
 
-// commands
+#define ADC_CALIBRATION_POINT_1 0.0   // 0 Celcius degree
+#define ADC_CALIBRATION_POINT_2 40.0  // +40 Celcius degree
+
+#define DAC_CALIBRATION_POINT_1 0.0   // 0 Celcius degree
+#define DAC_CALIBRATION_POINT_2 40.0  // +40 Celcius degree
+
+           /* COMMANDS  */
 
 #define CL_COMMAND_SET_ADDRESS {0x53, 0xE0, 0x01, 0x00} // set address given by the last byte. the last byte should be set by user)
 #define CL_COMMAND_READ_VALUE {0x53, 0xE1, 0x01}        // read a byte value

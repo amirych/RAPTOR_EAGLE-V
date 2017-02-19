@@ -74,6 +74,10 @@ EagleCamera::EagleCamera(const char* epix_video_fmt_filename):
     currentPreAmpGain(EagleCamera::HighGain), currentReadoutRate(EagleCamera::SlowRate),
     currentShutterState(EagleCamera::ShutterExp), currentReadoutMode(EagleCamera::NormalReadoutMode),
     cameraLog(nullptr), lastError(XCLIB_ERROR_OK),
+    _serialNumber(0), _buildDate(), _buildCode(),
+    _microVersion(), _FPGA_Version(),
+    ADC_Calibration(), ADC_LinearCoeffs(),
+    DAC_Calibration(), DAC_LinearCoeffs(),
     cameralink_handler()
 {
     if ( !createdObjects ) { // open XCLIB library
@@ -152,12 +156,18 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
         *cameraLog << std::endl << std::flush;
     }
 
-    logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "INITIALIZATION OF RAPTOR EAGLE CCD CAMERA ...");
+    logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "INITIALIZATION OF CCD CAMERA ...");
     logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Try to initialize CameraLink serial connection ...", 1);
 
     lastError = XCLIB_ERROR_OK;
 
     // init and setup serial connection
+
+    _serialNumber = 0;
+    _buildDate.clear();
+    _buildCode.clear();
+    memset(ADC_Calibration, 0, sizeof(ADC_Calibration));
+    memset(DAC_Calibration, 0, sizeof(DAC_Calibration));
 
     try {
         cameralink_handler.setUnitmap(cameraUnitmap);
@@ -166,6 +176,28 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
         cameralink_handler.setSystemState(true,true,false,false);
 
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "CameraLink serial connection is established", 1);
+
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Try to get manufacturer's data ...", 1);
+        getManufacturerData();
+        getVersions();
+
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Found Raptor CCD camera: ", 1);
+        int ntab = 3;
+        log_str = "Serial number: " + std::to_string(_serialNumber);
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, log_str, ntab);
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Build date (DD/MM/YY): " + _buildDate, ntab);
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Build code: " + _buildCode, ntab);
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Micro version: " + _microVersion, ntab);
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "FPGA version: " + _FPGA_Version, ntab);
+
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Try to set default mode ...", 1);
+
+        setBinning(1, 1);
+        setROI(1, 1, EAGLE_CAMERA_CCD_WIDTH, EAGLE_CAMERA_CCD_HEIGHT);
+        setReadoutRate(EagleCamera::SlowRate);
+        setReadoutMode(EagleCamera::NormalReadoutMode);
+        setShutterState(EagleCamera::ShutterExp);
+
     } catch ( XCLIB_Exception &ex ) {
         lastError = ex.getError();
         logToFile(ex);
@@ -438,6 +470,147 @@ bool EagleCamera::isTECEnabled()
 }
 
 
+void EagleCamera::setCCD_Temperature(const double temp)
+{
+    CameraLinkHandler::byte_array_t addr = {0x03, 0x04};
+    CameraLinkHandler::byte_array_t value(2);
+
+    uint16_t counts = static_cast<uint16_t>(DAC_LinearCoeffs[1]*temp + DAC_LinearCoeffs[0]);
+
+    value[0] = ( counts & 0x0F00) >> 8;
+    value[1] = counts & 0x00FF;
+
+    writeContinuousRegisters(addr,value);
+}
+
+
+double EagleCamera::getCCD_Temperature()
+{
+    //
+    // according to Reference Manual there are unusual addressing for this command (extra 0x00 after address)
+    //
+    CameraLinkHandler::byte_array_t addr = {0x6E, 0x6F};
+    CameraLinkHandler::byte_array_t comm_addr = {0x53, 0xE0, 0x02, 0x6E, 0x00};
+
+    CameraLinkHandler::byte_array_t value = readContinuousRegisters(addr, comm_addr);
+
+    uint16_t counts = ((value[0] & 0x0F) << 8) + value[1];
+
+    return ADC_LinearCoeffs[0] + ADC_LinearCoeffs[1]*counts;
+}
+
+
+double EagleCamera::getPCB_Temperature()
+{
+    //
+    // according to Reference Manual there are unusual addressing for this command (extra 0x00 after address)
+    //
+    CameraLinkHandler::byte_array_t addr = {0x70, 0x71};
+    CameraLinkHandler::byte_array_t comm_addr = {0x53, 0xE0, 0x02, 0x6E, 0x00};
+
+    CameraLinkHandler::byte_array_t value = readContinuousRegisters(addr, comm_addr);
+
+    uint16_t counts = ((value[0] & 0x0F) << 8) + value[1];
+
+    return counts/16.0;
+}
+
+
+void EagleCamera::setShutterState(const EagleCamera::ShutterState state)
+{
+    CameraLinkHandler::byte_array_t comm = CL_COMMAND_WRITE_VALUE;
+
+    comm[3] = 0xA5;
+    comm[4] = 0x00;
+
+    switch (state) {
+        case EagleCamera::ShutterClosed:
+            comm[4] |= CL_SHUTTER_CLOSED;
+            break;
+        case EagleCamera::ShutterOpen:
+            comm[4] |= CL_SHUTTER_OPEN;
+            break;
+        case EagleCamera::ShutterExp:
+            comm[4] |= CL_SHUTTER_EXP;
+            break;
+        default:
+            std::string log_str = "Unknown shutter state! (trying to set to " + std::to_string(state) + ")";
+            throw EagleCamera_Exception(EagleCamera::ERROR_BAD_PARAM, log_str);
+            break;
+    }
+
+    cameralink_handler.exec(comm);
+}
+
+
+EagleCamera::ShutterState EagleCamera::getShutterState()
+{
+    CameraLinkHandler::byte_array_t comm_addr = CL_COMMAND_SET_ADDRESS;
+    CameraLinkHandler::byte_array_t comm = CL_COMMAND_READ_VALUE;
+    CameraLinkHandler::byte_array_t value(1);
+
+    comm_addr[3] = 0xA5;
+
+    cameralink_handler.exec(comm,value);
+
+    switch (value[0]) {
+        case CL_SHUTTER_CLOSED:
+            return EagleCamera::ShutterClosed;
+        case CL_SHUTTER_OPEN:
+            return EagleCamera::ShutterOpen;
+        case CL_SHUTTER_EXP:
+            return EagleCamera::ShutterExp;
+        default:
+            return EagleCamera::UnknownShutterState;
+    }
+}
+
+
+void EagleCamera::setReadoutMode(const EagleCamera::ReadoutMode mode)
+{
+    CameraLinkHandler::byte_array_t comm = CL_COMMAND_WRITE_VALUE;
+    comm[3] = 0xF7;
+    comm[4] = 0x00;
+
+    switch (mode) {
+        case EagleCamera::NormalReadoutMode:
+            comm[4] |= CL_READOUT_MODE_NORMAL;
+            break;
+        case EagleCamera::TestReadoutMode:
+            comm[4] |= CL_READOUT_MODE_TEST;
+            break;
+        default:
+            std::string log_str = "Unknown readout mode! (trying to set to " + std::to_string(mode) + ")";
+            throw EagleCamera_Exception(EagleCamera::ERROR_BAD_PARAM, log_str);
+            break;
+    }
+
+    cameralink_handler.exec(comm);
+}
+
+
+EagleCamera::ReadoutMode EagleCamera::getReadoutMode()
+{
+    CameraLinkHandler::byte_array_t addr_comm = CL_COMMAND_SET_ADDRESS;
+    CameraLinkHandler::byte_array_t comm = CL_COMMAND_READ_VALUE;
+    CameraLinkHandler::byte_array_t value(1);
+
+    addr_comm[3] = 0xF7;
+
+    cameralink_handler.exec(addr_comm);
+    cameralink_handler.exec(comm, value);
+
+    switch (value[0]) {
+        case CL_READOUT_MODE_NORMAL:
+            return EagleCamera::NormalReadoutMode;
+        case CL_READOUT_MODE_TEST:
+            return EagleCamera::TestReadoutMode;
+        default:
+            return EagleCamera::UnknownReadoutMode;
+    }
+}
+
+
 void EagleCamera::logToFile(const EagleCamera::LogIdent ident, const std::string &log_str, const int indent_tabs)
 {
     if ( !cameraLog ) return;
@@ -483,6 +656,44 @@ void EagleCamera::logToFile(const XCLIB_Exception &ex, const int indent_tabs)
 }
 
 
+uint16_t EagleCamera::serialNumber() const
+{
+    return _serialNumber;
+}
+
+
+std::string EagleCamera::buildDate() const
+{
+    return _buildDate;
+}
+
+
+std::string EagleCamera::buildCode() const
+{
+    return _buildCode;
+}
+
+
+void EagleCamera::calibrationData(uint16_t *ADC_0, uint16_t *ADC_40, uint16_t *DAC_0, uint16_t *DAC_40)
+{
+    if ( ADC_0 ) *ADC_0 = ADC_Calibration[0];
+    if ( ADC_40 ) *ADC_40 = ADC_Calibration[1];
+
+    if ( DAC_0 ) *DAC_0 = DAC_Calibration[0];
+    if ( DAC_40 ) *DAC_40 = DAC_Calibration[1];
+}
+
+
+std::string EagleCamera::microVersion() const
+{
+    return _microVersion;
+}
+
+
+std::string EagleCamera::FPGA_Version() const
+{
+    return _FPGA_Version;
+}
 
                         /*  PROTECTED METHODS   */
 
@@ -513,10 +724,63 @@ unsigned char EagleCamera::getTriggerRegister()
 }
 
 
-CameraLinkHandler::byte_array_t EagleCamera::readContinuousRegisters(const CameraLinkHandler::byte_array_t &addr)
+void EagleCamera::getManufacturerData()
+{
+    cameralink_handler.setSystemState(true,true,false,true); // set FPGA_EPROM_COMMS bit
+
+    CameraLinkHandler::byte_array_t comm = CL_COMMAND_GET_MANUFACTURER_DATA_1;
+    cameralink_handler.exec(comm);
+
+    comm = CL_COMMAND_GET_MANUFACTURER_DATA_2;
+    CameraLinkHandler::byte_array_t value(18);
+    cameralink_handler.exec(comm,value);
+
+    _serialNumber = (value[0] << 8) + value[1];
+
+    _buildDate = std::to_string(value[2]) + "/" + std::to_string(value[3]) + "/" + std::to_string(value[4]); // DD/MM/YY
+
+    char buff[6];
+    _buildCode = (char*)memcpy(buff, value.data() + 5, 5);
+
+    ADC_Calibration[0] = (value[10] << 8) + value[11];
+    ADC_Calibration[1] = (value[12] << 8) + value[13];
+
+    // y = ADC_LinearCoeffs[0] + ADC_LinearCoeffs[1]*x
+    ADC_LinearCoeffs[1] = (ADC_Calibration[1] - ADC_Calibration[0])/(ADC_CALIBRATION_POINT_2 - ADC_CALIBRATION_POINT_1);
+    ADC_LinearCoeffs[0] = ADC_Calibration[0] - ADC_LinearCoeffs[1]*ADC_CALIBRATION_POINT_1;
+
+    DAC_Calibration[0] = (value[14] << 8) + value[15];
+    DAC_Calibration[1] = (value[16] << 8) + value[17];
+
+    // y = DAC_LinearCoeffs[0] + DAC_LinearCoeffs[1]*x
+    DAC_LinearCoeffs[1] = (DAC_Calibration[1] - DAC_Calibration[0])/(DAC_CALIBRATION_POINT_2 - DAC_CALIBRATION_POINT_1);
+    DAC_LinearCoeffs[0] = DAC_Calibration[0] - DAC_LinearCoeffs[1]*DAC_CALIBRATION_POINT_1;
+
+    cameralink_handler.setSystemState(true,true,false,false); // clear FPGA_EPROM_COMMS bit
+}
+
+
+void EagleCamera::getVersions()
+{
+    CameraLinkHandler::byte_array_t comm = {0x56};
+    CameraLinkHandler::byte_array_t value(2);
+
+    cameralink_handler.exec(comm,value); // get Micro version
+
+    _microVersion = std::to_string(value[0]) + "." + std::to_string(value[1]);
+
+    CameraLinkHandler::byte_array_t addr = { 0x7E,  0x7F };
+
+    value = readContinuousRegisters(addr); // get FPGA version
+
+    _FPGA_Version = std::to_string(value[0]) + "." + std::to_string(value[1]);
+}
+
+CameraLinkHandler::byte_array_t EagleCamera::readContinuousRegisters(const CameraLinkHandler::byte_array_t &addr,
+                                                                     CameraLinkHandler::byte_array_t &addr_comm)
 {
     CameraLinkHandler::byte_array_t res(addr.size());
-    CameraLinkHandler::byte_array_t addr_comm = CL_COMMAND_SET_ADDRESS;
+//    CameraLinkHandler::byte_array_t addr_comm = CL_COMMAND_SET_ADDRESS;
     CameraLinkHandler::byte_array_t comm = CL_COMMAND_READ_VALUE;
     CameraLinkHandler::byte_array_t value(1);
 

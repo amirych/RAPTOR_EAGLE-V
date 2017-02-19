@@ -112,6 +112,27 @@ public:
     void enableTEC(const bool flag = true);
     bool isTECEnabled();
 
+    void setCCD_Temperature(const double temp); // set TEC set point (desired CCD chip temperature)
+    double getCCD_Temperature();
+    double getPCB_Temperature();
+
+    void setShutterState(const EagleCamera::ShutterState state);
+    EagleCamera::ShutterState getShutterState();
+
+    void setReadoutMode(const EagleCamera::ReadoutMode mode);
+    EagleCamera::ReadoutMode getReadoutMode();
+
+    uint16_t serialNumber() const;
+    std::string buildDate() const;
+    std::string buildCode() const;
+
+    void calibrationData(uint16_t *ADC_0, uint16_t *ADC_40, uint16_t *DAC_0, uint16_t *DAC_40);
+
+    std::string microVersion() const;
+    std::string FPGA_Version() const;
+
+
+
     void logToFile(const EagleCamera::LogIdent ident, const std::string &log_str, const int indent_tabs = 0);
     void logToFile(const XCLIB_Exception &ex, const int indent_tabs = 0);
 
@@ -131,16 +152,33 @@ protected:
     std::ostream *cameraLog;
     int lastError;
 
+                /*  manufacturer's data */
+
+    uint16_t _serialNumber;
+    std::string _buildDate;
+    std::string _buildCode;
+    uint16_t ADC_Calibration[2];
+    double ADC_LinearCoeffs[2];
+    uint16_t DAC_Calibration[2];
+    double DAC_LinearCoeffs[2];
+
+    std::string _microVersion;
+    std::string _FPGA_Version;
+
+
     void logXCLibCall(const std::string &log_str);
 
         /*  members and methods to work with CameraLink serial connection  */
 
     unsigned char getCtrlRegister();
     unsigned char getTriggerRegister();
+    void getManufacturerData();
+    void getVersions(); // micro and FPGA versions
 
     CameraLinkHandler cameralink_handler;
 
-    CameraLinkHandler::byte_array_t readContinuousRegisters(const CameraLinkHandler::byte_array_t &addr);
+    CameraLinkHandler::byte_array_t readContinuousRegisters(const CameraLinkHandler::byte_array_t &addr,
+       CameraLinkHandler::byte_array_t &addr_comm = CameraLinkHandler::byte_array_t(CL_COMMAND_SET_ADDRESS));
     void writeContinuousRegisters(const CameraLinkHandler::byte_array_t &addr, const CameraLinkHandler::byte_array_t &values);
 
                 /*  static members and methods  */
