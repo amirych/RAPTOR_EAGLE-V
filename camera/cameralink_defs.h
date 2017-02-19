@@ -47,7 +47,7 @@
 
 // FPGA CTRL register
 
-#define CL_FPGA_CTRL_REG_HIGH_GAIN     0x80 // 7-th bit (high pre-amp gain)
+#define CL_FPGA_CTRL_REG_HIGH_GAIN     0x80 // 7-th bit (0 if high pre-amp gain)
 #define CL_FPGA_CTRL_REG_TMP_TRIP_RST  0x2  // 1-st bit
 #define CL_FPGA_CTRL_REG_ENABLE_TEC    0x1  // 0-th bit
 
@@ -85,6 +85,18 @@
 
 #define CL_READOUT_MODE_NORMAL  0x01
 #define CL_READOUT_MODE_TEST    0x04
+
+
+// commands
+
+#define CL_COMMAND_SET_ADDRESS {0x53, 0xE0, 0x01, 0x00} // set address given by the last byte. the last byte should be set by user)
+#define CL_COMMAND_READ_VALUE {0x53, 0xE1, 0x01}        // read a byte value
+
+#define CL_COMMAND_WRITE_VALUE {0x53, 0xE0, 0x02, 0x00, 0x00 } // write a byte value given by the last byte
+                                                               // at address given by 3-rd byte (starting from 0)
+
+#define CL_COMMAND_GET_MANUFACTURER_DATA_1 {0x53, 0xAE, 0x05, 0x01, 0x00, 0x00, 0x02, 0x00} // 1st command to get manufacturer's data
+#define CL_COMMAND_GET_MANUFACTURER_DATA_2 {0x53, 0xAF, 0x12} // the second one
 
 
 #endif // CAMERALINK_DEFS_H

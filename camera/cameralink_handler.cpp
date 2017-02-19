@@ -1,25 +1,35 @@
 #include "cameralink_handler.h"
+#include "eagle_camera.h"
 
-#include <memory>
 #include <algorithm>
+#include <cstdlib>
+
+// implemented in eagle_camera.cpp
+extern int XCLIB_API_CALL(int err_code, const char *context);
+extern int XCLIB_API_CALL(int err_code, const std::string& context);
+extern std::string pointer_to_str(void* ptr);
+
+static char nill = '\0';
 
 std::map<int,int> CameraLinkHandler::usedUnitmaps = std::map<int,int>();
 
 CameraLinkHandler::CameraLinkHandler(const int unitmap):
-    currentUnitmap(unitmap), currentSpeed(CL_DEFAULT_BAUD_RATE),
-    lastEPIXerror(0), lastETXerror(CL_ETX),
+    currentUnitmap(0), currentSpeed(CL_DEFAULT_BAUD_RATE),
+    lastXCLibError(0), lastControllerError(CL_ETX),
     ACK_Bit(CL_DEFAULT_ACK_ENABLED), CK_SUM_Bit(CL_DEFAULT_CK_SUM_ENABLED),
     FPGAinRST_Bit(true), FPGA_EPROM_Bit(false),
-    lastCameraMessage(nullptr), lastHostMessage(nullptr)
+    rx_buff(std::unique_ptr<char[]>(&nill)), tx_buff(std::unique_ptr<char[]>(&nill)),
+    lastLogMessageUniqPtr(std::unique_ptr<char[]>(new char[CAMERALINK_HANDLER_LOG_MSG_LEN])),
+    logFunc(nullptr)
 {
-    ++usedUnitmaps[unitmap];
 
-    // configure port only once per each unitmap
-    if ( usedUnitmaps[unitmap] == 1) lastEPIXerror = config(CL_DEFAULT_BAUD_RATE, CL_DEFAULT_DATA_BITS, CL_DEFAULT_STOP_BIT);
-    if ( lastEPIXerror < 0 ) return;
+    setUnitmap(unitmap);
+    if ( lastXCLibError < 0 ) return;
+
+    lastLogMessage = lastLogMessageUniqPtr.get();
 
     getMode();
-    if ( lastEPIXerror < 0 ) return;
+    if ( lastXCLibError < 0 ) return;
 
     setMode(ACK_Bit, CK_SUM_Bit);
 }
@@ -31,10 +41,13 @@ CameraLinkHandler::~CameraLinkHandler()
 }
 
 
-void CameraLinkHandler::setUnitmap(const int unitmap)
+void CameraLinkHandler::setUnitmap(const int unitmap, const bool force)
 {
+    lastXCLibError = 0;
+    lastControllerError = CL_ETX;
+
     if ( unitmap <= 0 ) {
-        lastEPIXerror = PXERBADPARM;
+        lastXCLibError = PXERBADPARM;
         return;
     }
 
@@ -42,8 +55,8 @@ void CameraLinkHandler::setUnitmap(const int unitmap)
     ++usedUnitmaps[unitmap];
 
     // configure port only once per each unitmap
-    if ( usedUnitmaps[unitmap] == 1) lastEPIXerror = config(CL_DEFAULT_BAUD_RATE, CL_DEFAULT_DATA_BITS, CL_DEFAULT_STOP_BIT);
-    if ( lastEPIXerror < 0 ) return;
+    if ( (usedUnitmaps[unitmap] == 1) || force ) lastXCLibError = config(CL_DEFAULT_BAUD_RATE, CL_DEFAULT_DATA_BITS, CL_DEFAULT_STOP_BIT);
+    if ( lastXCLibError < 0 ) return;
 
     getMode();
 }
@@ -55,21 +68,21 @@ int CameraLinkHandler::getUnitMap() const
 }
 
 
-int CameraLinkHandler::getLastEPIXError() const
+int CameraLinkHandler::getLastXCLibError() const
 {
-    return lastEPIXerror;
+    return lastXCLibError;
 }
 
 
-int CameraLinkHandler::getLastETXError() const
+char CameraLinkHandler::getLastControllerError() const
 {
-    return lastETXerror;
+    return lastControllerError;
 }
 
 
 bool CameraLinkHandler::isValid() const
 {
-    bool ok = ( (lastEPIXerror == 0) && (lastETXerror == CL_ETX) ) ? true : false;
+    bool ok = ( (lastXCLibError >= 0) && (lastControllerError == CL_ETX) ) ? true : false;
 
     return ok;
 }
@@ -77,13 +90,13 @@ bool CameraLinkHandler::isValid() const
 
 const char* CameraLinkHandler::getLastCameraMessage() const
 {
-    return lastCameraMessage;
+    return rx_buff.get();
 }
 
 
 const char* CameraLinkHandler::getLastHostMessage() const
 {
-    return lastHostMessage;
+    return tx_buff.get();
 }
 
 
@@ -92,7 +105,14 @@ const char* CameraLinkHandler::getLastHostMessage() const
 //
 int CameraLinkHandler::config(const long speed, const int bits, const int stop_bits)
 {
-    return lastEPIXerror = pxd_serialConfigure(currentUnitmap,0,speed,bits,0,stop_bits,0,0,0);
+    lastControllerError = CL_ETX;
+
+    std::string log_str = "pxd_serialConfigure(" + std::to_string(currentUnitmap) + ", 0, " + std::to_string(speed) +
+                          ", " + std::to_string(bits) + ", 0, " + std::to_string(stop_bits) + ", 0, 0, 0)";
+
+    XCLIB_API_CALL( lastXCLibError = pxd_serialConfigure(currentUnitmap,0,speed,bits,0,stop_bits,0,0,0), log_str);
+
+    return lastXCLibError;
 }
 
 
@@ -106,7 +126,7 @@ int CameraLinkHandler::setMode(const bool ack_enabled, const bool ck_sum_enabled
 
     exec(comm,ans,CL_DEFAULT_TIMEOUT);
 
-    return lastEPIXerror;
+    return lastXCLibError;
 }
 
 
@@ -116,29 +136,32 @@ int CameraLinkHandler::getMode()
 
     byte_array_t status(1);
 
-    bool ok = exec(comm, status, CL_DEFAULT_TIMEOUT);
+    exec(comm, status, CL_DEFAULT_TIMEOUT);
 
-    if ( ok ) {
-        if ( status[0] & CL_SYSTEM_STATE_CK_SUM ) CK_SUM_Bit = true; else CK_SUM_Bit = false;
-        if ( status[0] & CL_SYSTEM_STATE_ACK ) ACK_Bit = true; else ACK_Bit = false;
-        if ( status[0] & CL_SYSTEM_STATE_FPGA_RST_HOLD ) FPGAinRST_Bit = false; FPGAinRST_Bit = true; // here is opposite case!!!
-        if ( status[0] & CL_SYSTEM_STATE_FPGA_EPROM_COMMS ) FPGA_EPROM_Bit = true; FPGA_EPROM_Bit = false;
+    if ( status[0] & CL_SYSTEM_STATE_CK_SUM ) CK_SUM_Bit = true; else CK_SUM_Bit = false;
+    if ( status[0] & CL_SYSTEM_STATE_ACK ) ACK_Bit = true; else ACK_Bit = false;
+    if ( status[0] & CL_SYSTEM_STATE_FPGA_RST_HOLD ) FPGAinRST_Bit = false; FPGAinRST_Bit = true; // here is opposite case!!!
+    if ( status[0] & CL_SYSTEM_STATE_FPGA_EPROM_COMMS ) FPGA_EPROM_Bit = true; FPGA_EPROM_Bit = false;
 
-        currentSystemState = status[0];
-    }
+    currentSystemState = status[0];
 
-    return lastEPIXerror;
+    return lastXCLibError;
 }
 
 
 int CameraLinkHandler::read(byte_array_t &msg, const long timeout)
 {
-    lastEPIXerror = 0;
-    lastETXerror = CL_ETX;
+    lastXCLibError = 0;
+    lastControllerError = CL_ETX;
+
+    std::string log_str_timeout = "timeout occured while reading operation";
+
+    std::string log_str = "pxd_serialRead(" + std::to_string(currentUnitmap) + ", 0, NULL, 0)";
 
     // first, check for special invoking ...
 
-    if ( timeout < 0 ) return pxd_serialRead(currentUnitmap, 0, NULL, 0);
+    if ( logFunc ) logFunc(log_str);
+    if ( timeout < 0 ) return XCLIB_API_CALL( lastXCLibError = pxd_serialRead(currentUnitmap, 0, NULL, 0), log_str );
 
     // compute expected full length of camera UART mesage
     size_t UART_len = msg.size();
@@ -146,53 +169,58 @@ int CameraLinkHandler::read(byte_array_t &msg, const long timeout)
     if ( CK_SUM_Bit ) ++UART_len;
 
     // nothing to read, return number of bytes in Rx-buffer
-    if ( !UART_len ) return pxd_serialRead(currentUnitmap, 0, NULL, 0);
+    if ( logFunc ) logFunc(log_str);
+    if ( !UART_len ) return XCLIB_API_CALL( lastXCLibError = pxd_serialRead(currentUnitmap, 0, NULL, 0), log_str );
 
     std::chrono::milliseconds readTimeout{timeout};
     size_t timeout_counts = readTimeout.count();
     size_t sleep_msecs = timeout_counts/10;
 
-    std::unique_ptr<char[]> buff = std::unique_ptr<char[]>( new char[UART_len]);
-    char* buff_ptr = buff.get();
+    rx_buff = std::unique_ptr<char[]>( new char[UART_len+1]); // +1 to insert '\0' character
+    char* buff_ptr = rx_buff.get();
+    buff_ptr[UART_len] = '\0';
 
     size_t n_received = 0;
-    int n_read;
 
     auto start = std::chrono::system_clock::now();
 
-    n_read = pxd_serialRead(currentUnitmap, 0, NULL, 0); // how many bytes are available in Rx-buffer now
+    if ( logFunc ) logFunc(log_str);
+    XCLIB_API_CALL( lastXCLibError = pxd_serialRead(currentUnitmap, 0, NULL, 0), log_str ); // how many bytes are available in Rx-buffer now
 
-    while (n_read < msg.size()); { // wait for number of bytes at least equal to DATA field length
+    while (lastXCLibError < msg.size()); { // wait for number of bytes at least equal to DATA field length
         auto end = std::chrono::system_clock::now();
         std::chrono::duration<double> diff = end-start;
         if ( diff.count() >= timeout_counts ) {
-            return lastEPIXerror = PXERTIMEOUT;
+            throw XCLIB_Exception(lastXCLibError = PXERTIMEOUT, log_str_timeout);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(sleep_msecs));
-        n_read = pxd_serialRead(currentUnitmap, 0, NULL, 0); // how many bytes are available in Rx-buffer now
+        if ( logFunc ) logFunc(log_str);
+        XCLIB_API_CALL( lastXCLibError = pxd_serialRead(currentUnitmap, 0, NULL, 0), log_str ); // how many bytes are available in Rx-buffer now
     }
 
     while ( n_received < UART_len ) {
         auto end = std::chrono::system_clock::now();
         std::chrono::duration<double> diff = end-start;
         if ( diff.count() >= timeout_counts ) {
-            lastEPIXerror = PXERTIMEOUT;
-            break;
+            throw XCLIB_Exception(lastXCLibError = PXERTIMEOUT, log_str_timeout);
         }
 
-        n_read = pxd_serialRead(currentUnitmap, 0, buff_ptr + n_received, UART_len - n_received);
-        if ( n_read < 0 ) return lastEPIXerror = n_read;
-        if ( n_read == 0 ) {
+        log_str = "pxd_serialRead(" + std::to_string(currentUnitmap) + ", 0, " + pointer_to_str(buff_ptr + n_received) + ", " +
+                  std::to_string(UART_len - n_received) + ")";
+
+        if ( logFunc ) logFunc(log_str);
+        XCLIB_API_CALL( lastXCLibError = pxd_serialRead(currentUnitmap, 0, buff_ptr + n_received, UART_len - n_received), log_str );
+        if ( lastXCLibError == 0 ) {
             std::this_thread::sleep_for(std::chrono::milliseconds(sleep_msecs));
             continue; // wait for data
         }
 
-        n_received += n_read;
+        n_received += lastXCLibError;
 
         if ( n_received > msg.size() ) { // all DATA field bytes were read, look for ETX and Chk_Sum fields
                                          // Note: if n_received >= UART_len then Chk_Sum field was also read (do not check it)
-            if ( ACK_Bit ) lastETXerror = buff_ptr[msg.size()];
+            if ( ACK_Bit ) lastControllerError = buff_ptr[msg.size()];
         }
     }
 
@@ -204,20 +232,33 @@ int CameraLinkHandler::read(byte_array_t &msg, const long timeout)
         msg.clear(); // empty DATA field
     }
 
-    lastCameraMessage = buff_ptr;
+    if ( ACK_Bit && (lastControllerError != CL_ETX) ) {
+        log_str = "Last serial read operation return '" + std::to_string(lastControllerError) + "' error code!";
+        throw EagleCamera_Exception(EagleCamera::ERROR_CONTROLLER_ANSWER, log_str, lastControllerError);
+    }
 
-    return lastEPIXerror;
+    return lastXCLibError;
 }
 
 
 int CameraLinkHandler::write(const byte_array_t &msg, const long timeout)
 {
-    lastETXerror = CL_ETX;
-    lastEPIXerror = 0;
+    lastControllerError = CL_ETX;
+    lastXCLibError = 0;
 
-    if ( timeout < 0 ) return pxd_serialWrite(currentUnitmap, 0, NULL, 0); // how many bytes are available in Tx-buffer now;
+    std::string log_str_timeout = "timeout occured while writing operation";
 
-    if ( msg.size() == 0 ) return pxd_serialWrite(currentUnitmap, 0, NULL, 0); // how many bytes are available in Tx-buffer now;
+    std::string log_str = "pxd_serialWrite(" + std::to_string(currentUnitmap) + ", 0, NULL, 0)";
+
+    // special cases
+
+    // how many bytes are available in Tx-buffer now;
+    if ( logFunc ) logFunc(log_str);
+    if ( timeout < 0 ) return XCLIB_API_CALL( lastXCLibError = pxd_serialWrite(currentUnitmap, 0, NULL, 0), log_str);
+
+    // how many bytes are available in Tx-buffer now;
+    if ( logFunc ) logFunc(log_str);
+    if ( msg.size() == 0 ) return XCLIB_API_CALL( lastXCLibError = pxd_serialWrite(currentUnitmap, 0, NULL, 0), log_str);
 
 
     std::chrono::milliseconds readTimeout{timeout};
@@ -228,8 +269,9 @@ int CameraLinkHandler::write(const byte_array_t &msg, const long timeout)
     size_t UART_len = msg.size() + 1; // add mandatory for host message ETX byte
     if ( CK_SUM_Bit ) ++UART_len;
 
-    std::unique_ptr<char[]> buff = std::unique_ptr<char[]>(new char[UART_len]);
-    char* buff_ptr = buff.get();
+    tx_buff = std::unique_ptr<char[]>(new char[UART_len+1]); // +1 to insert '\0' character
+    char* buff_ptr = tx_buff.get();
+    buff_ptr[UART_len] = '\0';
 
     std::copy_n(msg.data(),msg.size(),buff_ptr);
     buff_ptr[msg.size()] = CL_ETX; // add ETX
@@ -243,9 +285,8 @@ int CameraLinkHandler::write(const byte_array_t &msg, const long timeout)
     }
 
     size_t n_written = 0;
-    int n_bytes;
 
-    lastEPIXerror = 0;
+    lastXCLibError = 0;
 
     auto start = std::chrono::system_clock::now();
 
@@ -253,72 +294,86 @@ int CameraLinkHandler::write(const byte_array_t &msg, const long timeout)
         auto end = std::chrono::system_clock::now();
         std::chrono::duration<double> diff = end-start;
         if ( diff.count() >= timeout_counts ) {
-            return lastEPIXerror = PXERTIMEOUT;
+            return lastXCLibError = PXERTIMEOUT;
         }
 
-        n_bytes = pxd_serialWrite(currentUnitmap, 0, NULL, 0); // how many bytes are available in Tx-buffer now
-        if ( n_bytes < 0 ) return lastEPIXerror = n_bytes;
+        // how many bytes are available in Tx-buffer now
+        if ( logFunc ) logFunc(log_str);
+        XCLIB_API_CALL( lastXCLibError = pxd_serialWrite(currentUnitmap, 0, NULL, 0), log_str);
 
-        while ( !n_bytes ); { // wait for at least 1 byte in Tx-buffer
+        while ( !lastXCLibError ); { // wait for at least 1 byte in Tx-buffer
             auto end = std::chrono::system_clock::now();
             std::chrono::duration<double> diff = end-start;
             if ( diff.count() >= timeout_counts ) {
-                return lastEPIXerror = PXERTIMEOUT;
+                throw XCLIB_Exception(lastXCLibError = PXERTIMEOUT, log_str_timeout);
             }
 
             std::this_thread::sleep_for(std::chrono::milliseconds(sleep_msecs));
-            n_bytes = pxd_serialWrite(currentUnitmap, 0, NULL, 0); // how many bytes are available in Tx-buffer now
-            if ( n_bytes < 0 ) return lastEPIXerror = n_bytes;
+
+            // how many bytes are available in Tx-buffer now
+            if ( logFunc ) logFunc(log_str);
+            XCLIB_API_CALL( lastXCLibError = pxd_serialWrite(currentUnitmap, 0, NULL, 0), log_str);
         }
 
         // it should return immediately
-        n_bytes = pxd_serialWrite(currentUnitmap, 0, buff_ptr + n_written, n_bytes);
-        if ( n_bytes < 0 ) return lastEPIXerror = n_bytes;
+        log_str = "pxd_serialWrite(" + std::to_string(currentUnitmap) + ", " + pointer_to_str(buff_ptr + n_written) +
+                  ", " + std::to_string(lastXCLibError);
+        if ( logFunc ) logFunc(log_str);
+        XCLIB_API_CALL( lastXCLibError = pxd_serialWrite(currentUnitmap, 0, buff_ptr + n_written, lastXCLibError), log_str);
 
-        n_written += n_bytes;
+        n_written += lastXCLibError;
     }
 
-    lastHostMessage = buff_ptr;
-
-    return lastEPIXerror;
+    return lastXCLibError;
 }
 
 
-bool CameraLinkHandler::exec(const byte_array_t &command, byte_array_t &ans, const long timeout, const long sleep)
+void CameraLinkHandler::exec(const byte_array_t &command, byte_array_t &ans, const long timeout, const long sleep)
 {
     write(command, timeout);
-    if ( !lastEPIXerror && (lastETXerror == CL_ETX) ) return true; else return false;
 
     if ( sleep > 0 ) std::this_thread::sleep_for(std::chrono::milliseconds(sleep));
 
     read(ans,timeout);
+}
 
-    if ( !lastEPIXerror && (lastETXerror == CL_ETX) ) return true; else return false;
+
+void CameraLinkHandler::exec(const byte_array_t &command, const long timeout, const long sleep)
+{
+    byte_array_t ans;
+
+    exec(command, ans, timeout, sleep);
 }
 
 
 int CameraLinkHandler::reset()
 {
-    lastEPIXerror = 0;
-    byte_array_t cam_msg(2);
+    lastXCLibError = 0;
+    lastControllerError = CL_ETX;
+
+    byte_array_t cam_msg;
 
     byte_array_t cmd  = {0x55, 0x99, 0x66, 0x11}; // reset FPGA
 
-    int ret = write(cmd); // there is no camera response for this command!!!
-    if ( ret < 0 ) return lastEPIXerror = ret;
+    write(cmd); // there is no camera response for this command!!!
 
-    byte_array_t msg = {0x4F, 0x51};  // set 'FPGA in RST' bit to 0 (reset)
+    byte_array_t msg = {0x4F, 0x51};  // set 'FPGA in RST' bit to 0 (reset). also set ACK and CK_SUM bits
+    write(msg);
 
-    while ( !lastEPIXerror ) { // poll camera with 'msg' and wait for camera response ...
-        ret = write(msg);
-        if ( ret < 0 ) return lastEPIXerror = ret;
+    ACK_Bit = true;
+    CK_SUM_Bit = true;
 
+    while ( lastXCLibError < 2 ) { // poll camera with 'msg' and wait for camera response bytes in Rx-buffer
+                                   // (according to Raptor Eagle-V 4240 Instruction manual) ...
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        lastEPIXerror = read(cam_msg);
-        if ( lastETXerror != CL_ETX ) break;
-    }
 
-    return lastEPIXerror;
+        lastXCLibError = read(cam_msg, -1);
+
+        write(msg);
+    }
+    lastXCLibError = read(cam_msg); // read response
+
+    return lastXCLibError;
 }
 
 
@@ -337,5 +392,11 @@ int CameraLinkHandler::setSystemState(const bool ck_sum_bit, const bool ack_bit,
 
     exec(comm, ans, CL_DEFAULT_TIMEOUT);
 
-    return lastEPIXerror;
+    return lastXCLibError;
+}
+
+
+void CameraLinkHandler::setLogFunc(const log_func_t &func)
+{
+    logFunc = func;
 }
