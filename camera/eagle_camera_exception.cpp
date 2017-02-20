@@ -7,13 +7,13 @@
                     *                                                         *
                     **********************************************************/
 
-EagleCamera_Exception::EagleCamera_Exception(const EagleCamera::Error err, const std::string &context, const byte contr_ans):
+EagleCamera_Exception::EagleCamera_Exception(const EagleCamera::Error err, const std::string &context, const char contr_ans):
     std::exception(), error(err), _context(context), controllerAnswer(contr_ans)
 {
 }
 
 
-EagleCamera_Exception::EagleCamera_Exception(const EagleCamera::Error err, const char *context, const byte contr_ans):
+EagleCamera_Exception::EagleCamera_Exception(const EagleCamera::Error err, const char *context, const char contr_ans):
     EagleCamera_Exception(err, std::string(context), contr_ans)
 {
 }

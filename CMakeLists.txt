@@ -30,9 +30,20 @@ configure_file (
   #  "${PROJECT_BINARY_DIR}/eagle_camera_config.h"
   )
 
+
+# API library
 set(EAGLE_CAMERA_LIB eagle_camera)
 include_directories(./camera ${XCLIB_INCLUDE_DIR})
 aux_source_directory(./camera/ EAGLE_CAMERA_SRC)
 add_library(${EAGLE_CAMERA_LIB} SHARED ${EAGLE_CAMERA_SRC})
 target_link_libraries(${EAGLE_CAMERA_LIB} ${XCLIB_LIBRARIES})
 target_compile_definitions(${EAGLE_CAMERA_LIB} PRIVATE EAGLE_CAMERA_LIBRARY=1)
+
+
+# temporary test suite
+set(TEST_PROG test_prog)
+add_executable(${TEST_PROG} test_prog.cpp)
+target_link_libraries(${TEST_PROG} ${EAGLE_CAMERA_LIB})
+
+SET(CPACK_GENERATOR "TBZ2")
+include(CPack)

@@ -37,7 +37,6 @@ class EAGLE_CAMERA_LIBRARY_EXPORT XCLIB_Exception;
 
 
 
-
                  /*********************************************
                  *                                            *
                  *      EagleCamera CLASS DECLARATION         *
@@ -122,6 +121,9 @@ public:
     void setReadoutMode(const EagleCamera::ReadoutMode mode);
     EagleCamera::ReadoutMode getReadoutMode();
 
+    void setFrameRate(const double rate);
+    double getFrameRate();
+
     uint16_t serialNumber() const;
     std::string buildDate() const;
     std::string buildCode() const;
@@ -152,6 +154,8 @@ protected:
     std::ostream *cameraLog;
     int lastError;
 
+    void setInitialState();
+
                 /*  manufacturer's data */
 
     uint16_t _serialNumber;
@@ -171,14 +175,21 @@ protected:
         /*  members and methods to work with CameraLink serial connection  */
 
     unsigned char getCtrlRegister();
+
     unsigned char getTriggerRegister();
+    void setTriggerRegister(const bool snapshot = false, const bool fixed_framerate = false,
+                            const bool start_cont_seq = false, const bool abort = false,
+                            const bool ext_trigger = false, const bool rising_edge = false);
+    void setTriggerRegister(const unsigned char bits);
+
     void getManufacturerData();
     void getVersions(); // micro and FPGA versions
 
     CameraLinkHandler cameralink_handler;
 
+    CameraLinkHandler::byte_array_t readContinuousRegisters(const CameraLinkHandler::byte_array_t &addr);
     CameraLinkHandler::byte_array_t readContinuousRegisters(const CameraLinkHandler::byte_array_t &addr,
-       CameraLinkHandler::byte_array_t &addr_comm = CameraLinkHandler::byte_array_t(CL_COMMAND_SET_ADDRESS));
+       CameraLinkHandler::byte_array_t &addr_comm );
     void writeContinuousRegisters(const CameraLinkHandler::byte_array_t &addr, const CameraLinkHandler::byte_array_t &values);
 
                 /*  static members and methods  */
@@ -198,8 +209,8 @@ protected:
 class EAGLE_CAMERA_LIBRARY_EXPORT EagleCamera_Exception: public std::exception
 {
 public:
-    EagleCamera_Exception(const EagleCamera::Error err, const std::string &context, const byte contr_ans = CL_ETX);
-    EagleCamera_Exception(const EagleCamera::Error err, const char* context, const byte contr_ans = CL_ETX);
+    EagleCamera_Exception(const EagleCamera::Error err, const std::string &context, const char contr_ans = CL_ETX);
+    EagleCamera_Exception(const EagleCamera::Error err, const char* context, const char contr_ans = CL_ETX);
 
     EagleCamera::Error getError() const;
     char getControllerAnswer() const;     // controller answer for serial CameraLink read operation

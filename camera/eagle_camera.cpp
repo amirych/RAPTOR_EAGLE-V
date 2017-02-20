@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <ctime>
+#include <cstring>
 
 
                     /*  Auxiliary functions */
@@ -137,11 +138,17 @@ EagleCamera::LogLevel EagleCamera::getLogevel() const
 
 bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
 {
-    cameraUnitmap = unitmap;
+    std::string log_str;
 
     cameraLog = log_file;
 
-    std::string log_str;
+    if ( unitmap <= 0 ) {
+        log_str = "Unitmap must be greater than 0! (trying to set to " + std::to_string(unitmap) + ")";
+        throw EagleCamera_Exception(EagleCamera::ERROR_BAD_PARAM, log_str);
+    }
+
+    cameraUnitmap = unitmap;
+
 
     // print logging header (ignore logLevel!)
     if ( cameraLog ) {
@@ -181,8 +188,9 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
         getManufacturerData();
         getVersions();
 
-        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Found Raptor CCD camera: ", 1);
         int ntab = 3;
+
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Found Raptor CCD camera: ", 1);
         log_str = "Serial number: " + std::to_string(_serialNumber);
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, log_str, ntab);
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Build date (DD/MM/YY): " + _buildDate, ntab);
@@ -190,13 +198,36 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Micro version: " + _microVersion, ntab);
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "FPGA version: " + _FPGA_Version, ntab);
 
-        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Try to set default mode ...", 1);
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Try to set camera to default initial state ...", 1);
 
-        setBinning(1, 1);
-        setROI(1, 1, EAGLE_CAMERA_CCD_WIDTH, EAGLE_CAMERA_CCD_HEIGHT);
-        setReadoutRate(EagleCamera::SlowRate);
-        setReadoutMode(EagleCamera::NormalReadoutMode);
-        setShutterState(EagleCamera::ShutterExp);
+        setInitialState();
+
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "TRIGGER MODE: IDLE", ntab);
+
+        log_str = "GAIN: ";
+        if ( currentPreAmpGain == EagleCamera::HighGain ) log_str += "HIGH"; else log_str += "LOW";
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, log_str, ntab);
+
+        log_str = "PIXEL CLOCK RATE (READOUT RATE): ";
+        if ( currentReadoutRate == EagleCamera::FastRate ) log_str += "FAST"; else log_str += "FAST";
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, log_str, ntab);
+
+        log_str = "SHUTTER STATE: ";
+        switch (currentShutterState) {
+        case EagleCamera::ShutterClosed:
+            log_str += "ALWAYS CLOSED";
+            break;
+        case EagleCamera::ShutterOpen:
+            log_str += "OPEN";
+            break;
+        case EagleCamera::ShutterExp:
+            log_str += "OPEN DURING EXPOSURE";
+            break;
+        default:
+            log_str += "UNKNOWN STATE!";
+            break;
+        }
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, log_str, ntab);
 
     } catch ( XCLIB_Exception &ex ) {
         lastError = ex.getError();
@@ -220,11 +251,19 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
 void EagleCamera::startExposure()
 {
 
+    // a single exposure in snapshot mode
+
+    unsigned char bits = getTriggerRegister();
+    bits |= CL_TRIGGER_MODE_SNAPSHOT;
+    setTriggerRegister();
 }
 
 
 void EagleCamera::stopExposure()
 {
+    unsigned char bits = getTriggerRegister();
+    bits |= CL_TRIGGER_MODE_ABORT_CURRENT_EXP;
+    setTriggerRegister(bits);
 }
 
 
@@ -611,6 +650,38 @@ EagleCamera::ReadoutMode EagleCamera::getReadoutMode()
 }
 
 
+void EagleCamera::setFrameRate(const double rate)
+{
+    CameraLinkHandler::byte_array_t addr = {0xDC, 0xDD, 0xDE, 0xDF, 0xE0};
+    CameraLinkHandler::byte_array_t value;
+
+    uint16_t counts = static_cast<uint16_t>(rate/2.5E-8);
+
+    for ( size_t i = 4; i; --i ) {
+        value.push_back(counts & (0xFF << i*8));
+    }
+
+    writeContinuousRegisters(addr, value);
+}
+
+
+double EagleCamera::getFrameRate()
+{
+    CameraLinkHandler::byte_array_t addr = {0xDC, 0xDD, 0xDE, 0xDF, 0xE0};
+    CameraLinkHandler::byte_array_t value = readContinuousRegisters(addr);
+
+    uint64_t counts = 0;
+
+    size_t i = addr.size()-1;
+    for ( auto b: value) {
+        counts += b << (i*8);
+        --i;
+    }
+
+    return 2.5E-8*counts;
+}
+
+
 void EagleCamera::logToFile(const EagleCamera::LogIdent ident, const std::string &log_str, const int indent_tabs)
 {
     if ( !cameraLog ) return;
@@ -697,6 +768,28 @@ std::string EagleCamera::FPGA_Version() const
 
                         /*  PROTECTED METHODS   */
 
+
+void EagleCamera::setInitialState()
+{
+    setBinning(1, 1);
+    setROI(1, 1, EAGLE_CAMERA_CCD_WIDTH, EAGLE_CAMERA_CCD_HEIGHT);
+
+    currentPreAmpGain = EagleCamera::HighGain;
+    setGain(currentPreAmpGain);
+
+    currentReadoutRate = EagleCamera::SlowRate;
+    setReadoutRate(currentReadoutRate);
+
+    currentReadoutMode = EagleCamera::NormalReadoutMode;
+    setReadoutMode(currentReadoutMode);
+
+    currentShutterState = EagleCamera::ShutterExp;
+    setShutterState(currentShutterState);
+
+    setTriggerRegister(); // clear all bits. IDLE mode
+}
+
+
 unsigned char EagleCamera::getCtrlRegister()
 {
     CameraLinkHandler::byte_array_t addr = CL_COMMAND_SET_ADDRESS;
@@ -721,6 +814,32 @@ unsigned char EagleCamera::getTriggerRegister()
     cameralink_handler.exec(comm,val);
 
     return val[0];
+}
+
+
+void EagleCamera::setTriggerRegister(const unsigned char bits)
+{
+    CameraLinkHandler::byte_array_t comm = CL_COMMAND_WRITE_VALUE;
+
+    comm[3] = 0xD4;
+    comm[4] = bits;
+
+    cameralink_handler.exec(comm);
+}
+
+void EagleCamera::setTriggerRegister(const bool snapshot, const bool fixed_framerate, const bool start_cont_seq,
+                                     const bool abort, const bool ext_trigger, const bool rising_edge)
+{
+    unsigned char bits = 0;
+
+    if ( snapshot ) bits |= CL_TRIGGER_MODE_SNAPSHOT;
+    if ( fixed_framerate ) bits |= CL_TRIGGER_MODE_FIXED_FRAME_RATE;
+    if ( start_cont_seq ) bits |= CL_TRIGGER_MODE_CONTINUOUS_SEQ;
+    if ( abort ) bits |= CL_TRIGGER_MODE_ABORT_CURRENT_EXP;
+    if ( ext_trigger ) bits |= CL_TRIGGER_MODE_EXT_TRIGGER;
+    if ( rising_edge ) bits |= CL_TRIGGER_MODE_ENABLE_RISING_EDGE;
+
+    setTriggerRegister(bits);
 }
 
 
@@ -794,6 +913,13 @@ CameraLinkHandler::byte_array_t EagleCamera::readContinuousRegisters(const Camer
 
     return res;
 }
+
+CameraLinkHandler::byte_array_t EagleCamera::readContinuousRegisters(const CameraLinkHandler::byte_array_t &addr)
+{
+    CameraLinkHandler::byte_array_t addr_comm = CL_COMMAND_SET_ADDRESS;
+    return readContinuousRegisters(addr, addr_comm);
+}
+
 
 
 void EagleCamera::writeContinuousRegisters(const CameraLinkHandler::byte_array_t &addr, const CameraLinkHandler::byte_array_t &values)
