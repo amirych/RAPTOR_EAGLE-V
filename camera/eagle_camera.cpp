@@ -86,8 +86,8 @@ EagleCamera::EagleCamera(const char* epix_video_fmt_filename):
             std::string log_str = std::string("pxd_PIXCIopen(\"\",\"\",") + epix_video_fmt_filename + ")";
             XCLIB_API_CALL( lastError = pxd_PIXCIopen("","",epix_video_fmt_filename), log_str);
         } else {
-            std::string log_str = "pxd_PIXCIopen(\"\",\"\",\"\")";
-            XCLIB_API_CALL( lastError = pxd_PIXCIopen("","",""), log_str);
+            std::string log_str = "pxd_PIXCIopen(\"\",\"DEFAULT\",\"\")";
+            XCLIB_API_CALL( lastError = pxd_PIXCIopen("","DEFAULT",""), log_str);
         }
     }
 
@@ -177,9 +177,14 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
     memset(DAC_Calibration, 0, sizeof(DAC_Calibration));
 
     try {
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Set camera unitmap ...", 2);
         cameralink_handler.setUnitmap(cameraUnitmap);
 
+        cameralink_handler.reset();
+
+
         // setup camera to default state
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Set default system state ...", 2);
         cameralink_handler.setSystemState(true,true,false,false);
 
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "CameraLink serial connection is established", 1);
@@ -689,7 +694,7 @@ void EagleCamera::logToFile(const EagleCamera::LogIdent ident, const std::string
     if ( logLevel == EagleCamera::LOG_LEVEL_QUIET ) return;
 
     std::string tab;
-    if ( indent_tabs > 0 ) tab.resize(indent_tabs*EAGLE_CAMERA_DEFAULT_LOG_TAB);
+    if ( indent_tabs > 0 ) tab.resize(indent_tabs*EAGLE_CAMERA_DEFAULT_LOG_TAB, ' ');
 
     std::string str = "[" + time_stamp() + "]";
 

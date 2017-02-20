@@ -77,14 +77,14 @@ public:
                                         // XCLIB function, or 0 in success.
                                         // if msg.size() == 0, then return result of pxd_serialWrite(unitmap,0,NULL,0)
 
-    void exec(const byte_array_t &command, byte_array_t &ans, const long timeout = CL_DEFAULT_TIMEOUT, const long sleep = 0);
+    void exec(const byte_array_t &command, byte_array_t &ans, const long timeout = CL_DEFAULT_TIMEOUT, const long sleep = 10);
                                         // execute a command. 'ans' will contain an camera answer.
                                         // the 'command' and 'ans' arguments follow to 'read' and 'write' methods description.
                                         // 'timeout' is timeout in milliseconds for read/write operations.
                                         // 'sleep' is a sleep period in milliseconds between 'write command' and
                                         // 'read answer' operations
 
-    void exec(const byte_array_t &command, const long timeout = CL_DEFAULT_TIMEOUT, const long sleep = 0);
+    void exec(const byte_array_t &command, const long timeout = CL_DEFAULT_TIMEOUT, const long sleep = 10);
 
     int setSpeed(const long speed);
     long getSpeed() const;

@@ -45,5 +45,3 @@ set(TEST_PROG test_prog)
 add_executable(${TEST_PROG} test_prog.cpp)
 target_link_libraries(${TEST_PROG} ${EAGLE_CAMERA_LIB})
 
-SET(CPACK_GENERATOR "TBZ2")
-include(CPack)
