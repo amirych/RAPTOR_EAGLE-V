@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <sstream>
 
 // implemented in eagle_camera.cpp
 extern int XCLIB_API_CALL(int err_code, const char *context);
@@ -159,14 +160,18 @@ int CameraLinkHandler::read(byte_array_t &msg, const long timeout)
 
     std::string log_str_timeout = "timeout occured while reading operation";
 
-    std::string log_str = "pxd_serialRead(" + std::to_string(currentUnitmap) + ", 0, NULL, 0)";
+//    std::string log_str = "pxd_serialRead(" + std::to_string(currentUnitmap) + ", 0, NULL, 0)";
+
+    std::string log_str = formatLog("pxd_serialRead",NULL,0);
 
     // first, check for special invoking ...
 
     if ( timeout < 0 ) {
         lastXCLibError = pxd_serialRead(currentUnitmap, 0, NULL, 0);
-        if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
-        return XCLIB_API_CALL( lastXCLibError , log_str + " -> " + std::to_string(lastXCLibError));
+//        if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+//        return XCLIB_API_CALL( lastXCLibError , log_str + " -> " + std::to_string(lastXCLibError));
+        if ( logFunc ) logFunc(formatLog(log_str, lastXCLibError));
+        return XCLIB_API_CALL( lastXCLibError , log_str);
     }
 
     // compute expected full length of camera UART mesage
@@ -177,8 +182,10 @@ int CameraLinkHandler::read(byte_array_t &msg, const long timeout)
     // nothing to read, return number of bytes in Rx-buffer
     if ( !UART_len ) {
         lastXCLibError = pxd_serialRead(currentUnitmap, 0, NULL, 0);
-        if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
-        return XCLIB_API_CALL( lastXCLibError , log_str + " -> " + std::to_string(lastXCLibError));
+//        if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+//        return XCLIB_API_CALL( lastXCLibError , log_str + " -> " + std::to_string(lastXCLibError));
+        if ( logFunc ) logFunc(formatLog(log_str, lastXCLibError));
+        return XCLIB_API_CALL( lastXCLibError , log_str);
     }
 
 
@@ -190,12 +197,13 @@ int CameraLinkHandler::read(byte_array_t &msg, const long timeout)
     char* buff_ptr = rx_buff.get();
     buff_ptr[UART_len] = '\0';
 
-    std::cout << "READ: reading " << UART_len << "-bytes ...\n";
+//    std::cout << "READ: reading " << UART_len << "-bytes ...\n";
 
     auto start = std::chrono::system_clock::now();
 
     XCLIB_API_CALL( lastXCLibError = pxd_serialRead(currentUnitmap, 0, NULL, 0), log_str ); // how many bytes are available in Rx-buffer now
-    if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+    if ( logFunc ) logFunc(formatLog(log_str, lastXCLibError));
+//    if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
 
     while ( lastXCLibError < UART_len ) { // wait for UART_len number of bytes in Rx-buffer
         auto end = std::chrono::system_clock::now();
@@ -207,21 +215,27 @@ int CameraLinkHandler::read(byte_array_t &msg, const long timeout)
         std::this_thread::sleep_for(std::chrono::milliseconds(sleep_msecs));
 
         XCLIB_API_CALL( lastXCLibError = pxd_serialRead(currentUnitmap, 0, NULL, 0), log_str ); // how many bytes are available in Rx-buffer now
-        if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+        if ( logFunc ) logFunc(formatLog(log_str, lastXCLibError));
+//        if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
     }
 
-    log_str = "pxd_serialRead(" + std::to_string(currentUnitmap) + ", 0, " + pointer_to_str(buff_ptr) + ", " +
-              std::to_string(UART_len) + ")";
+//    log_str = "pxd_serialRead(" + std::to_string(currentUnitmap) + ", 0, " + pointer_to_str(buff_ptr) + ", " +
+//              std::to_string(UART_len) + ")";
+
+    log_str = formatLog("pxd_serialRead",buff_ptr,UART_len);
 
     XCLIB_API_CALL( lastXCLibError = pxd_serialRead(currentUnitmap, 0, buff_ptr, UART_len), log_str );
-    if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+    if ( logFunc ) {
+        logFunc( formatLog("pxd_serialRead",buff_ptr,UART_len,lastXCLibError) );
+//        logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+    }
 
     if ( msg.size() ) {
         for ( size_t i = 0; i < msg.size(); ++i ) msg[i] = buff_ptr[i];
     }
-    std::cout << "READ: UART [";
-    for ( size_t i = 0; i < UART_len; ++i ) printf("%#x ",buff_ptr[i]);
-    std::cout << "]\n";
+//    std::cout << "READ: UART [";
+//    for ( size_t i = 0; i < UART_len; ++i ) printf("%#x ",buff_ptr[i]);
+//    std::cout << "]\n";
 
     if ( ACK_Bit ) {
         lastControllerError = buff_ptr[msg.size()];
@@ -242,20 +256,23 @@ int CameraLinkHandler::write(const byte_array_t &msg, const long timeout)
 
     std::string log_str_timeout = "timeout occured while writing operation";
 
-    std::string log_str = "pxd_serialWrite(" + std::to_string(currentUnitmap) + ", 0, NULL, 0)";
+//    std::string log_str = "pxd_serialWrite(" + std::to_string(currentUnitmap) + ", 0, NULL, 0)";
+    std::string log_str = formatLog("pxd_serialWrite",NULL,0);
 
     // special cases
 
     // how many bytes are available in Tx-buffer now;
     if ( timeout < 0 ) {
         lastXCLibError = pxd_serialWrite(currentUnitmap, 0, NULL, 0);
-        return XCLIB_API_CALL( lastXCLibError, log_str + " -> " + std::to_string(lastXCLibError));
+//        return XCLIB_API_CALL( lastXCLibError, log_str + " -> " + std::to_string(lastXCLibError));
+        return XCLIB_API_CALL( lastXCLibError, formatLog(log_str, lastXCLibError) );
     }
 
     // how many bytes are available in Tx-buffer now;
     if ( msg.size() == 0 ) {
         lastXCLibError = pxd_serialWrite(currentUnitmap, 0, NULL, 0);
-        return XCLIB_API_CALL( lastXCLibError, log_str + " -> " + std::to_string(lastXCLibError));
+//        return XCLIB_API_CALL( lastXCLibError, log_str + " -> " + std::to_string(lastXCLibError));
+        return XCLIB_API_CALL( lastXCLibError, formatLog(log_str, lastXCLibError) );
     }
 
     std::chrono::milliseconds readTimeout{timeout};
@@ -285,33 +302,41 @@ int CameraLinkHandler::write(const byte_array_t &msg, const long timeout)
 
     auto start = std::chrono::system_clock::now();
 
-    std::cout << "WRITE UART: [";
-    for (int i = 0; i < UART_len; ++i) printf("%#x ", buff_ptr[i]);
-    std::cout << "]\n";
+//    std::cout << "WRITE UART: [";
+//    for (int i = 0; i < UART_len; ++i) printf("%#x ", buff_ptr[i]);
+//    std::cout << "]\n";
 
     // how many bytes are available in Tx-buffer now
-    XCLIB_API_CALL( lastXCLibError = pxd_serialWrite(currentUnitmap, 0, NULL, -1), log_str);
-    if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+    XCLIB_API_CALL( lastXCLibError = pxd_serialWrite(currentUnitmap, 0, NULL, 0), log_str);
+//    if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+    if ( logFunc ) logFunc( formatLog(log_str, lastXCLibError) );
 
     while ( lastXCLibError < UART_len ) { // wait for free space in Tx-buffer
         auto end = std::chrono::system_clock::now();
         std::chrono::duration<double> diff = end-start;
-        if ( diff.count() >= timeout_counts ) {
+        if ( std::chrono::duration_cast<std::chrono::milliseconds>(diff).count() >= timeout_counts ) {
             throw XCLIB_Exception(lastXCLibError = PXERTIMEOUT, log_str_timeout);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(sleep_msecs));
 
         // how many bytes are available in Tx-buffer now
-        XCLIB_API_CALL( lastXCLibError = pxd_serialWrite(currentUnitmap, 0, NULL, -1), log_str);
-        if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+        XCLIB_API_CALL( lastXCLibError = pxd_serialWrite(currentUnitmap, 0, NULL, 0), log_str);
+//        if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+        if ( logFunc ) logFunc( formatLog(log_str, lastXCLibError) );
     }
 
     // it should return immediately
-    log_str = "pxd_serialWrite(" + std::to_string(currentUnitmap) + ", 0, " + pointer_to_str(buff_ptr) +
-              ", " + std::to_string(UART_len) + ")";
+//    log_str = "pxd_serialWrite(" + std::to_string(currentUnitmap) + ", 0, " + pointer_to_str(buff_ptr) +
+//              ", " + std::to_string(UART_len) + ")";
+    log_str = formatLog("pxd_serialWrite",buff_ptr,UART_len);
+
     XCLIB_API_CALL( lastXCLibError = pxd_serialWrite(currentUnitmap, 0, buff_ptr, UART_len), log_str);
-    if ( logFunc ) logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+    if ( logFunc ) {
+//        logFunc(log_str + " -> " + std::to_string(lastXCLibError));
+        log_str = formatLog("pxd_serialWrite",buff_ptr,UART_len, lastXCLibError);
+        logFunc( log_str);
+    }
 
     return lastXCLibError;
 }
@@ -319,15 +344,15 @@ int CameraLinkHandler::write(const byte_array_t &msg, const long timeout)
 
 void CameraLinkHandler::exec(const byte_array_t &command, byte_array_t &ans, const long timeout, const long sleep)
 {
-    std::cout << "EXEC: write \n";
+//    std::cout << "EXEC: write \n";
     write(command, timeout);
-    std::cout << "EXEC: write OK\n";
+//    std::cout << "EXEC: write OK\n";
 
     if ( sleep > 0 ) std::this_thread::sleep_for(std::chrono::milliseconds(sleep));
 
-    std::cout << "EXEC: read\n";
+//    std::cout << "EXEC: read\n";
     read(ans,timeout);
-    std::cout << "EXEC: read OK\n";
+//    std::cout << "EXEC: read OK\n";
 }
 
 
@@ -339,22 +364,29 @@ void CameraLinkHandler::exec(const byte_array_t &command, const long timeout, co
 }
 
 
-int CameraLinkHandler::reset()
+int CameraLinkHandler::reset(const long timeout)
 {
+    std::string log_str_timeout = "timeout occured while reset micro controller!";
+
+    std::chrono::milliseconds readTimeout{timeout};
+    size_t timeout_counts = readTimeout.count();
+
     lastXCLibError = 0;
     lastControllerError = CL_ETX;
 
     byte_array_t cam_msg;
 
-    byte_array_t cmd  = {0x55, 0x99, 0x66, 0x11}; // reset FPGA
+    byte_array_t cmd  = {0x55, 0x99, 0x66, 0x11}; // reset micro
 
     write(cmd); // there is no camera response for this command!!!
 
-    byte_array_t msg = {0x4F, 0x51};  // set 'FPGA in RST' bit to 0 (reset). also set ACK and CK_SUM bits
-//    write(msg);
+    byte_array_t msg = {0x4F, 0x54};  // set 'FPGA in RST' bit to 0 (reset). also set ACK and CK_SUM bits
+//    byte_array_t msg = {0x4F, 0x51};  // set 'FPGA in RST' bit to 0 (reset). also set ACK and CK_SUM bits
 
     ACK_Bit = true;
     CK_SUM_Bit = true;
+
+    auto start = std::chrono::system_clock::now();
 
     while ( lastXCLibError < 2 ) { // poll camera with 'msg' and wait for camera response bytes in Rx-buffer
                                    // (according to Raptor Eagle-V 4240 Instruction manual) ...
@@ -363,6 +395,12 @@ int CameraLinkHandler::reset()
 
         lastXCLibError = read(cam_msg, -1);
 
+        auto end = std::chrono::system_clock::now();
+        std::chrono::duration<double> diff = end-start;
+
+        if ( std::chrono::duration_cast<std::chrono::milliseconds>(diff).count() >= timeout_counts ) {
+            throw XCLIB_Exception(lastXCLibError = PXERTIMEOUT, log_str_timeout);
+        }
     }
     lastXCLibError = read(cam_msg); // read response
 
@@ -394,4 +432,42 @@ int CameraLinkHandler::setSystemState(const bool ck_sum_bit, const bool ack_bit,
 void CameraLinkHandler::setLogFunc(const log_func_t &func)
 {
     logFunc = func;
+}
+
+
+std::string CameraLinkHandler::formatLog(const std::string &log_str, const int err_code)
+{
+    return log_str + " -> " + std::to_string(err_code);
+}
+
+std::string CameraLinkHandler::formatLog(const char *log_str, const int err_code)
+{
+    return formatLog(std::string(log_str), err_code);
+}
+
+
+std::string CameraLinkHandler::formatLog(const char *func_name, const char *UART_msg, const size_t UART_len)
+{
+    std::ostringstream st;
+
+    st << func_name << "(" << currentUnitmap << ", 0, " << pointer_to_str((void*)UART_msg) << ", " << UART_len << ")";
+
+    return st.str();
+}
+
+std::string CameraLinkHandler::formatLog(const char *func_name, const char *UART_msg,
+                                         const size_t UART_len, const int err_code)
+{
+    std::ostringstream st;
+    st.str(formatLog(formatLog(func_name, UART_msg, UART_len), err_code));
+
+    if ( !UART_len ) return st.str();
+
+    st << " [";
+    size_t i;
+    for (i = 0; i < (UART_len-1); ++i) st << std::nouppercase << "0x" << std::hex << std::uppercase << UART_msg[i] << ", ";
+    st << std::nouppercase << "0x" << std::hex << std::uppercase << UART_msg[i];
+    st << "]";
+
+    return st.str();
 }

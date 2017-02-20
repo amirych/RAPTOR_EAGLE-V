@@ -180,7 +180,7 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Set camera unitmap ...", 2);
         cameralink_handler.setUnitmap(cameraUnitmap);
 
-        cameralink_handler.reset();
+//        cameralink_handler.reset();
 
 
         // setup camera to default state

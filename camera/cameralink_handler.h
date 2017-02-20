@@ -45,7 +45,7 @@ public:
     int getMode();
     int setSystemState(const bool ck_sum_bit, const bool ack_bit, const bool fpga_in_reset, const bool fpga_eprom);
 
-    int reset();  // reset camera firmware
+    int reset(const long timeout = CL_DEFAULT_TIMEOUT);  // reset camera firmware
 
     int getLastXCLibError() const;        // error returned by XCLIB PIXCI library functions
     char getLastControllerError() const;  // error returned by Raptor Eagle-V camera controller
@@ -114,6 +114,11 @@ private:
     log_func_t logFunc;
 
     static std::map<int,int> usedUnitmaps;
+
+    std::string formatLog(const std::string &log_str, const int err_code);
+    std::string formatLog(const char* log_str, const int err_code);
+    std::string formatLog(const char* func_name, const char* UART_msg, const size_t UART_len);
+    std::string formatLog(const char* func_name, const char* UART_msg, const size_t UART_len, const int err_code);
 };
 
 #endif // CAMERALINK_HANDLER_H
