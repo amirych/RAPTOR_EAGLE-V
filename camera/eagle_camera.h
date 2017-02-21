@@ -112,6 +112,7 @@ public:
     bool isTECEnabled();
 
     void setCCD_Temperature(const double temp); // set TEC set point (desired CCD chip temperature)
+    double getTEC_SetPoint();
     double getCCD_Temperature();
     double getPCB_Temperature();
 

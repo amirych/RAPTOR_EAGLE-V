@@ -3,6 +3,7 @@
 #include <chrono>
 #include <ctime>
 #include <cstring>
+#include <cmath>
 
 
                     /*  Auxiliary functions */
@@ -154,7 +155,7 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
     if ( cameraLog ) {
         for (int i = 0; i < 5; ++i) *cameraLog << std::endl;
         std::string line;
-        line.resize(80,'*');
+        line.resize(89,'*');
         *cameraLog << line << std::endl;
         *cameraLog << "   " << time_stamp() << std::endl;
         *cameraLog << "   'EAGLE CAMERA' v. " << EAGLE_CAMERA_VERSION_MAJOR << "." << EAGLE_CAMERA_VERSION_MINOR <<
@@ -189,6 +190,7 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
 
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "CameraLink serial connection is established", 1);
 
+        logToFile(EagleCamera::LOG_IDENT_BLANK,"");
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Try to get manufacturer's data ...", 1);
         getManufacturerData();
         getVersions();
@@ -203,11 +205,33 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Micro version: " + _microVersion, ntab);
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "FPGA version: " + _FPGA_Version, ntab);
 
+        // get framebuffer dimensions
+        int xdim, ydim, bits, cc;
+
+        log_str = "pxd__imageXdim()";
+        XCLIB_API_CALL( xdim = pxd_imageXdim(), log_str );
+        log_str = "pxd__imageYdim()";
+        XCLIB_API_CALL( ydim = pxd_imageYdim(), log_str );
+        log_str = "pxd__imageBdim()";
+        XCLIB_API_CALL( bits = pxd_imageBdim(), log_str );
+        log_str = "pxd__imageCdim()";
+        XCLIB_API_CALL( cc = pxd_imageCdim(), log_str );
+
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "CCD dimensions: [" +
+                  std::to_string(xdim) + ", " + std::to_string(xdim) + "] pixels", ntab);
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "CCD bits per pixel: " + std::to_string(cc*bits), ntab);
+
+
+        log_str = "pxd_infoModel(" + std::to_string(cameraUnitmap) + ")";
+        XCLIB_API_CALL( cc = pxd_infoModel(cameraUnitmap), log_str );
+
+        logToFile(EagleCamera::LOG_IDENT_BLANK,"");
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Try to set camera to default initial state ...", 1);
+
 
         setInitialState();
 
-        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "TRIGGER MODE: IDLE", ntab);
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "TRIGGER STATE: IDLE", ntab);
 
         log_str = "GAIN: ";
         if ( currentPreAmpGain == EagleCamera::HighGain ) log_str += "HIGH"; else log_str += "LOW";
@@ -256,11 +280,39 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
 void EagleCamera::startExposure()
 {
 
+    std::string log_str;
+
     // a single exposure in snapshot mode
 
-    unsigned char bits = getTriggerRegister();
+//    unsigned char bits = getTriggerRegister();
+    unsigned char bits = 0;
     bits |= CL_TRIGGER_MODE_SNAPSHOT;
-    setTriggerRegister();
+
+
+    XCLIB_API_CALL( pxd_doSnap(cameraUnitmap,1,10000), "pxd_doSnap" );
+    setTriggerRegister(bits);
+
+    size_t N = 9;
+    ushort buff[N];
+    memset(buff,0,sizeof(buff));
+
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    int i = pxd_capturedBuffer(cameraUnitmap);
+
+
+    std::cout << "captured: " << i << "\n";
+
+    if ( !i ) {
+        std::cout << "read ...\n";
+        XCLIB_API_CALL( pxd_readushort(cameraUnitmap, 1, 0,0,2,2, buff, N, "GRAY"), "pxd_readushort");
+    } else {
+        std::cout << "no buffers!\n";
+    }
+
+    std::cout << "\nPIXELS:\n";
+    for (size_t i=0; i < N; ++i ) {
+        std::cout << buff[i] << "\n";
+    }
 }
 
 
@@ -279,13 +331,16 @@ void EagleCamera::setExposure(const double exp_time)
         throw EagleCamera_Exception(EagleCamera::ERROR_BAD_PARAM, log_str);
     }
 
-    uint64_t counts = static_cast<uint64_t>(exp_time/2.5E-8); // in FPGA counts, 1 count = 25nsecs = 1/40MHz
+    size_t N = 5;
+
+    uint64_t counts = static_cast<uint64_t>(ceil(exp_time/2.5E-8)); // in FPGA counts, 1 count = 25nsecs = 1/40MHz
 
     CameraLinkHandler::byte_array_t addr = {0xED, 0xEE, 0xEF, 0xF0, 0xF1};
-    CameraLinkHandler::byte_array_t value;
+    CameraLinkHandler::byte_array_t value(N);
 
-    for ( size_t i = 4; i; --i ) {
-        value.push_back(counts & (0xFF << i*8));
+    for ( size_t i = 1; i <= N ; ++i ) {
+        value[N-i] = (counts & 0xFF);
+        counts >>= 8;
     }
 
     writeContinuousRegisters(addr, value);
@@ -300,10 +355,10 @@ double EagleCamera::getExposure()
 
     uint64_t counts = 0;
 
-    size_t i = addr.size()-1;
-    for ( auto b: res) {
-        counts += b << (i*8);
-        --i;
+    counts |= res[0];
+    for ( int i = 1; i < 5 ; ++i ) {
+        counts <<= 8;
+        counts |= res[i];
     }
 
     return 2.5E-8*counts;
@@ -519,12 +574,25 @@ void EagleCamera::setCCD_Temperature(const double temp)
     CameraLinkHandler::byte_array_t addr = {0x03, 0x04};
     CameraLinkHandler::byte_array_t value(2);
 
-    uint16_t counts = static_cast<uint16_t>(DAC_LinearCoeffs[1]*temp + DAC_LinearCoeffs[0]);
+    uint16_t counts = static_cast<uint16_t>(ceil((temp-ADC_LinearCoeffs[0])/ADC_LinearCoeffs[1]));
 
     value[0] = ( counts & 0x0F00) >> 8;
     value[1] = counts & 0x00FF;
 
     writeContinuousRegisters(addr,value);
+}
+
+
+double EagleCamera::getTEC_SetPoint()
+{
+    CameraLinkHandler::byte_array_t addr = {0x03, 0x04};
+
+    CameraLinkHandler::byte_array_t value = readContinuousRegisters(addr);
+
+    uint16_t counts = (value[0] & 0x0F) << 8;
+    counts += value[1];
+
+    return static_cast<double>(ADC_LinearCoeffs[0] + ADC_LinearCoeffs[1]*counts);
 }
 
 
@@ -538,9 +606,11 @@ double EagleCamera::getCCD_Temperature()
 
     CameraLinkHandler::byte_array_t value = readContinuousRegisters(addr, comm_addr);
 
-    uint16_t counts = ((value[0] & 0x0F) << 8) + value[1];
+    uint16_t counts = ( value[0] << 8) + value[1];
 
-    return ADC_LinearCoeffs[0] + ADC_LinearCoeffs[1]*counts;
+    double val = ADC_LinearCoeffs[1]*static_cast<double>(counts);
+
+    return ADC_LinearCoeffs[0] + val;
 }
 
 
@@ -700,8 +770,8 @@ void EagleCamera::logToFile(const EagleCamera::LogIdent ident, const std::string
 
     switch ( ident ) {
     case EagleCamera::LOG_IDENT_BLANK:
-        *cameraLog  << tab << log_str << std::endl << std::flush;
-        break;
+        *cameraLog  << log_str << std::endl << std::flush;
+        return;
     case EagleCamera::LOG_IDENT_CAMERA_INFO:
         str += "[CAMERA INFO] ";
         break;
@@ -850,7 +920,7 @@ void EagleCamera::setTriggerRegister(const bool snapshot, const bool fixed_frame
 
 void EagleCamera::getManufacturerData()
 {
-    cameralink_handler.setSystemState(true,true,false,true); // set FPGA_EPROM_COMMS bit
+    cameralink_handler.setSystemState(CL_DEFAULT_CK_SUM_ENABLED,CL_DEFAULT_ACK_ENABLED,false,true); // set FPGA_EPROM_COMMS bit
 
     CameraLinkHandler::byte_array_t comm = CL_COMMAND_GET_MANUFACTURER_DATA_1;
     cameralink_handler.exec(comm);
@@ -866,17 +936,26 @@ void EagleCamera::getManufacturerData()
     char buff[6];
     _buildCode = (char*)memcpy(buff, value.data() + 5, 5);
 
-    ADC_Calibration[0] = (value[10] << 8) + value[11];
-    ADC_Calibration[1] = (value[12] << 8) + value[13];
+//    ADC_Calibration[0] = (value[10] << 8) + value[11];
+//    ADC_Calibration[1] = (value[12] << 8) + value[13];
+    ADC_Calibration[0] = (value[11] << 8) + value[10];
+    ADC_Calibration[1] = (value[13] << 8) + value[12];
+
+//    printf("AA: %d %d\n",value[11] << 8, value[10]);
+//    printf("AA: %d %d\n",(value[13] << 8),  value[12]);
 
     // y = ADC_LinearCoeffs[0] + ADC_LinearCoeffs[1]*x
-    ADC_LinearCoeffs[1] = (ADC_Calibration[1] - ADC_Calibration[0])/(ADC_CALIBRATION_POINT_2 - ADC_CALIBRATION_POINT_1);
-    ADC_LinearCoeffs[0] = ADC_Calibration[0] - ADC_LinearCoeffs[1]*ADC_CALIBRATION_POINT_1;
+    // temp(Celcius) = ADC_LinearCoeffs[0] + ADC_LinearCoeffs[1]*ADC(counts)
+    ADC_LinearCoeffs[1] = (ADC_CALIBRATION_POINT_2 - ADC_CALIBRATION_POINT_1)/(ADC_Calibration[1] - ADC_Calibration[0]);
+    ADC_LinearCoeffs[0] = ADC_CALIBRATION_POINT_1 - ADC_LinearCoeffs[1]*ADC_Calibration[0];
 
-    DAC_Calibration[0] = (value[14] << 8) + value[15];
-    DAC_Calibration[1] = (value[16] << 8) + value[17];
+//    DAC_Calibration[0] = (value[14] << 8) + value[15];
+//    DAC_Calibration[1] = (value[16] << 8) + value[17];
+    DAC_Calibration[0] = (value[15] << 8) + value[14];
+    DAC_Calibration[1] = (value[17] << 8) + value[16];
 
     // y = DAC_LinearCoeffs[0] + DAC_LinearCoeffs[1]*x
+    // DAC(counts) = DAC_LinearCoeffs[0] + DAC_LinearCoeffs[1]*temp
     DAC_LinearCoeffs[1] = (DAC_Calibration[1] - DAC_Calibration[0])/(DAC_CALIBRATION_POINT_2 - DAC_CALIBRATION_POINT_1);
     DAC_LinearCoeffs[0] = DAC_Calibration[0] - DAC_LinearCoeffs[1]*DAC_CALIBRATION_POINT_1;
 

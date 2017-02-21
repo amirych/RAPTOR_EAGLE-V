@@ -106,8 +106,8 @@ private:
     std::unique_ptr<char[]>  tx_buff;     // full host UART message
     std::unique_ptr<char[]>  rx_buff;     // full camera UART message
 
-    std::unique_ptr<char[]> lastLogMessageUniqPtr;
-    char* lastLogMessage;
+//    std::unique_ptr<char[]> lastLogMessageUniqPtr;
+//    char* lastLogMessage;
 
     unsigned char currentSystemState;
 
