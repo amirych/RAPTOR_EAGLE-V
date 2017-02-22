@@ -170,6 +170,7 @@ protected:
     std::string _microVersion;
     std::string _FPGA_Version;
 
+    void snap(){std::cout << "doSnap = " << pxd_doSnap(cameraUnitmap,1,10000) << "\n";}
 
     void logXCLibCall(const std::string &log_str);
 
@@ -178,9 +179,9 @@ protected:
     unsigned char getCtrlRegister();
 
     unsigned char getTriggerRegister();
-    void setTriggerRegister(const bool snapshot = false, const bool fixed_framerate = false,
-                            const bool start_cont_seq = false, const bool abort = false,
-                            const bool ext_trigger = false, const bool rising_edge = false);
+//    void setTriggerRegister(const bool snapshot = false, const bool fixed_framerate = false,
+//                            const bool start_cont_seq = false, const bool abort = false,
+//                            const bool ext_trigger = false, const bool rising_edge = false);
     void setTriggerRegister(const unsigned char bits);
 
     void getManufacturerData();

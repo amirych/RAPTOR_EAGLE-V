@@ -42,7 +42,7 @@ public:
 
     int config(const long speed, const int bits, const int stop_bits);  // configure CameraLink serial port
     int setMode(const bool ack_enabled, const bool ck_sum_enabled);
-    int getMode();
+    int getMode(unsigned char* mode = nullptr);
     int setSystemState(const bool ck_sum_bit, const bool ack_bit, const bool fpga_in_reset, const bool fpga_eprom);
 
     int reset(const long timeout = CL_DEFAULT_TIMEOUT);  // reset camera firmware

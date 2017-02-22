@@ -130,7 +130,7 @@ int CameraLinkHandler::setMode(const bool ack_enabled, const bool ck_sum_enabled
 }
 
 
-int CameraLinkHandler::getMode()
+int CameraLinkHandler::getMode(unsigned char *mode)
 {
     byte_array_t comm = {0x49}; // get system status
 
@@ -144,6 +144,8 @@ int CameraLinkHandler::getMode()
     if ( status[0] & CL_SYSTEM_STATE_FPGA_EPROM_COMMS ) FPGA_EPROM_Bit = true; FPGA_EPROM_Bit = false;
 
     currentSystemState = status[0];
+
+    if ( mode ) *mode = currentSystemState;
 
     return lastXCLibError;
 }

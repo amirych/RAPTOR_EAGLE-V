@@ -4,7 +4,12 @@
 #include <ctime>
 #include <cstring>
 #include <cmath>
+#include <thread>
 
+//static void snap(EagleCamera *camera)
+//{
+//    camera->setTriggerRegister(0x1); // snapshot
+//}
 
                     /*  Auxiliary functions */
 
@@ -238,7 +243,7 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, log_str, ntab);
 
         log_str = "PIXEL CLOCK RATE (READOUT RATE): ";
-        if ( currentReadoutRate == EagleCamera::FastRate ) log_str += "FAST"; else log_str += "FAST";
+        if ( currentReadoutRate == EagleCamera::FastRate ) log_str += "FAST"; else log_str += "SLOW";
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, log_str, ntab);
 
         log_str = "SHUTTER STATE: ";
@@ -287,32 +292,71 @@ void EagleCamera::startExposure()
 //    unsigned char bits = getTriggerRegister();
     unsigned char bits = 0;
     bits |= CL_TRIGGER_MODE_SNAPSHOT;
+//    bits |= CL_TRIGGER_MODE_FIXED_FRAME_RATE;
+//    bits |= CL_TRIGGER_MODE_CONTINUOUS_SEQ;
 
 
-    XCLIB_API_CALL( pxd_doSnap(cameraUnitmap,1,10000), "pxd_doSnap" );
-    setTriggerRegister(bits);
+//    XCLIB_API_CALL( pxd_goSnap(cameraUnitmap,1), "pxd_goSnap" );
+//    XCLIB_API_CALL( pxd_goLive(cameraUnitmap,1), "pxd_goLive" );
+
+//    XCLIB_API_CALL( pxd_doSnap(cameraUnitmap,1,10000), "pxd_doSnap" );
+
+    std::cout << "field counts: " << pxd_capturedFieldCount(cameraUnitmap) << "\n";
+
+    std::thread tt(&EagleCamera::snap,this);
+    tt.detach();
+
+//    XCLIB_API_CALL( pxd_goLivePair(cameraUnitmap,1,2), "pxd_goLivePair" );
+
+    setTriggerRegister(bits); // snapshot
+
+//    std::cout << "GP counts: " << pxd_getGPTrigger(cameraUnitmap,1) << "\n";
+
+//    unsigned char rr;
+//    rr = getTriggerRegister();
+//    std::cout << "TRIGGER REGS: " << (int)rr << ", " << (int)bits << "\n";
+
+//    XCLIB_API_CALL( pxd_doSnap(cameraUnitmap,1,10000), "pxd_doSnap" );
 
     size_t N = 9;
     ushort buff[N];
     memset(buff,0,sizeof(buff));
 
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    auto start = std::chrono::system_clock::now();
+
+
     int i = pxd_capturedBuffer(cameraUnitmap);
+    while ( !i ) {
+        auto end = std::chrono::system_clock::now();
+        std::chrono::duration<double> diff = end-start;
+        if ( std::chrono::duration_cast<std::chrono::seconds>(diff).count() >=
+             std::chrono::seconds(10).count() ) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        i = pxd_capturedBuffer(cameraUnitmap);
+    }
 
 
     std::cout << "captured: " << i << "\n";
 
-    if ( !i ) {
+    if ( i ) {
         std::cout << "read ...\n";
-        XCLIB_API_CALL( pxd_readushort(cameraUnitmap, 1, 0,0,2,2, buff, N, "GRAY"), "pxd_readushort");
+        char col[] = "GRAY";
+        XCLIB_API_CALL( pxd_readushort(cameraUnitmap, 1, 0,0,2,2, buff, N, col), "pxd_readushort");
     } else {
         std::cout << "no buffers!\n";
     }
+    std::cout << "field counts: " << pxd_capturedFieldCount(cameraUnitmap) << "\n";
 
     std::cout << "\nPIXELS:\n";
     for (size_t i=0; i < N; ++i ) {
         std::cout << buff[i] << "\n";
     }
+
+//    rr = getTriggerRegister();
+//    std::cout << "TRIGGER REGS: " << (int)rr << ", " << (int)bits << "\n";
+
 }
 
 
@@ -344,6 +388,10 @@ void EagleCamera::setExposure(const double exp_time)
     }
 
     writeContinuousRegisters(addr, value);
+
+    // set Framerate according to Exp. time
+
+    setFrameRate(1.0/exp_time);
 }
 
 
@@ -665,6 +713,7 @@ EagleCamera::ShutterState EagleCamera::getShutterState()
 
     comm_addr[3] = 0xA5;
 
+    cameralink_handler.exec(comm_addr);
     cameralink_handler.exec(comm,value);
 
     switch (value[0]) {
@@ -728,15 +777,21 @@ EagleCamera::ReadoutMode EagleCamera::getReadoutMode()
 void EagleCamera::setFrameRate(const double rate)
 {
     CameraLinkHandler::byte_array_t addr = {0xDC, 0xDD, 0xDE, 0xDF, 0xE0};
-    CameraLinkHandler::byte_array_t value;
 
-    uint16_t counts = static_cast<uint16_t>(rate/2.5E-8);
+    size_t N = 5;
+    CameraLinkHandler::byte_array_t value(N);
 
-    for ( size_t i = 4; i; --i ) {
-        value.push_back(counts & (0xFF << i*8));
+    uint16_t counts = static_cast<uint16_t>(ceil(rate/2.5E-8));
+
+    for ( size_t i = 1; i <= N ; ++i ) {
+        value[N-i] = (counts & 0xFF);
+        counts >>= 8;
     }
-
     writeContinuousRegisters(addr, value);
+
+    // set Exp time according to Framerate
+
+//    setExposure(1.0/rate); // race condition!!!
 }
 
 
@@ -747,10 +802,10 @@ double EagleCamera::getFrameRate()
 
     uint64_t counts = 0;
 
-    size_t i = addr.size()-1;
-    for ( auto b: value) {
-        counts += b << (i*8);
-        --i;
+    counts |= value[0];
+    for ( int i = 1; i < 5 ; ++i ) {
+        counts <<= 8;
+        counts |= value[i];
     }
 
     return 2.5E-8*counts;
@@ -852,7 +907,7 @@ void EagleCamera::setInitialState()
     currentPreAmpGain = EagleCamera::HighGain;
     setGain(currentPreAmpGain);
 
-    currentReadoutRate = EagleCamera::SlowRate;
+    currentReadoutRate = EagleCamera::FastRate;
     setReadoutRate(currentReadoutRate);
 
     currentReadoutMode = EagleCamera::NormalReadoutMode;
@@ -861,7 +916,7 @@ void EagleCamera::setInitialState()
     currentShutterState = EagleCamera::ShutterExp;
     setShutterState(currentShutterState);
 
-    setTriggerRegister(); // clear all bits. IDLE mode
+    setTriggerRegister(0x0); // clear all bits. IDLE mode
 }
 
 
@@ -902,20 +957,20 @@ void EagleCamera::setTriggerRegister(const unsigned char bits)
     cameralink_handler.exec(comm);
 }
 
-void EagleCamera::setTriggerRegister(const bool snapshot, const bool fixed_framerate, const bool start_cont_seq,
-                                     const bool abort, const bool ext_trigger, const bool rising_edge)
-{
-    unsigned char bits = 0;
+//void EagleCamera::setTriggerRegister(const bool snapshot, const bool fixed_framerate, const bool start_cont_seq,
+//                                     const bool abort, const bool ext_trigger, const bool rising_edge)
+//{
+//    unsigned char bits = 0;
 
-    if ( snapshot ) bits |= CL_TRIGGER_MODE_SNAPSHOT;
-    if ( fixed_framerate ) bits |= CL_TRIGGER_MODE_FIXED_FRAME_RATE;
-    if ( start_cont_seq ) bits |= CL_TRIGGER_MODE_CONTINUOUS_SEQ;
-    if ( abort ) bits |= CL_TRIGGER_MODE_ABORT_CURRENT_EXP;
-    if ( ext_trigger ) bits |= CL_TRIGGER_MODE_EXT_TRIGGER;
-    if ( rising_edge ) bits |= CL_TRIGGER_MODE_ENABLE_RISING_EDGE;
+//    if ( snapshot ) bits |= CL_TRIGGER_MODE_SNAPSHOT;
+//    if ( fixed_framerate ) bits |= CL_TRIGGER_MODE_FIXED_FRAME_RATE;
+//    if ( start_cont_seq ) bits |= CL_TRIGGER_MODE_CONTINUOUS_SEQ;
+//    if ( abort ) bits |= CL_TRIGGER_MODE_ABORT_CURRENT_EXP;
+//    if ( ext_trigger ) bits |= CL_TRIGGER_MODE_EXT_TRIGGER;
+//    if ( rising_edge ) bits |= CL_TRIGGER_MODE_ENABLE_RISING_EDGE;
 
-    setTriggerRegister(bits);
-}
+//    setTriggerRegister(bits);
+//}
 
 
 void EagleCamera::getManufacturerData()
