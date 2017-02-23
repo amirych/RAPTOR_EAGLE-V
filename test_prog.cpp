@@ -12,13 +12,14 @@ int main(int argc, char* argv[])
     try {
             EagleCamera cam;
 //        EagleCamera cam("/home/timur/raptor_eagle-v.fmt");
-//        EagleCamera cam("/home/timur/zz1");
+//        EagleCamera cam("/home/timur/zz");
 
         if ( argc > 1 ) cam.setLogLevel(EagleCamera::LOG_LEVEL_ERROR);
         cam.initCamera(1, &std::cout);
 
-        double texp = 1.33;
-        texp = 7.777;
+        cam.setFrameRate(1.0);
+        double texp = 1.0;
+//        texp = 7.777;
         std::cout << "\n\nSET EXP: " << texp << "\n";
         cam.setExposure(texp);
 

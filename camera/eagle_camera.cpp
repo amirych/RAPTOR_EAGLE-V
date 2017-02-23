@@ -89,8 +89,8 @@ EagleCamera::EagleCamera(const char* epix_video_fmt_filename):
 {
     if ( !createdObjects ) { // open XCLIB library
         if ( epix_video_fmt_filename != nullptr ) {
-            std::string log_str = std::string("pxd_PIXCIopen(\"\",\"\",") + epix_video_fmt_filename + ")";
-            XCLIB_API_CALL( lastError = pxd_PIXCIopen("","",epix_video_fmt_filename), log_str);
+            std::string log_str = std::string("pxd_PIXCIopen(\"\",NULL,") + epix_video_fmt_filename + ")";
+            XCLIB_API_CALL( lastError = pxd_PIXCIopen("",NULL,epix_video_fmt_filename), log_str);
         } else {
             std::string log_str = "pxd_PIXCIopen(\"\",\"DEFAULT\",\"\")";
             XCLIB_API_CALL( lastError = pxd_PIXCIopen("","DEFAULT",""), log_str);
@@ -189,9 +189,19 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
 //        cameralink_handler.reset();
 
 
+
         // setup camera to default state
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Set default system state ...", 2);
-        cameralink_handler.setSystemState(true,true,false,false);
+        cameralink_handler.setSystemState(CL_DEFAULT_CK_SUM_ENABLED,CL_DEFAULT_ACK_ENABLED,false,false);
+
+//        CameraLinkHandler::byte_array_t b(2);
+//        for (int i = 0; i < 3; ++i) cameralink_handler.exec({0x53,0xE0,0x01,0x09});
+//        CameraLinkHandler::byte_array_t b1(1);
+//        cameralink_handler.exec(CL_COMMAND_READ_VALUE,b1);
+//        printf("GOT: %#x\n", (int)b1[0]);
+
+//        cameralink_handler.exec({0x56},b);
+//        printf("GOT: %#x %#x\n",b[0],b[1]);
 
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "CameraLink serial connection is established", 1);
 
@@ -229,6 +239,7 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
 
         log_str = "pxd_infoModel(" + std::to_string(cameraUnitmap) + ")";
         XCLIB_API_CALL( cc = pxd_infoModel(cameraUnitmap), log_str );
+
 
         logToFile(EagleCamera::LOG_IDENT_BLANK,"");
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Try to set camera to default initial state ...", 1);
@@ -296,21 +307,39 @@ void EagleCamera::startExposure()
 //    bits |= CL_TRIGGER_MODE_CONTINUOUS_SEQ;
 
 
+//    XCLIB_API_CALL( pxd_goAbortLive(cameraUnitmap), "pxd_goAbortLive" );
 //    XCLIB_API_CALL( pxd_goSnap(cameraUnitmap,1), "pxd_goSnap" );
 //    XCLIB_API_CALL( pxd_goLive(cameraUnitmap,1), "pxd_goLive" );
 
 //    XCLIB_API_CALL( pxd_doSnap(cameraUnitmap,1,10000), "pxd_doSnap" );
 
+//    pxd_setCameraLinkCCOut(cameraUnitmap,0);
+
+    std::cout << "FieldCount: " << pxd_buffersFieldCount(cameraUnitmap,1) << "\n";
     std::cout << "field counts: " << pxd_capturedFieldCount(cameraUnitmap) << "\n";
 
-    std::thread tt(&EagleCamera::snap,this);
-    tt.detach();
+    int gp = 0;
+    std::cout << "getGPin: " << pxd_getGPIn(cameraUnitmap,gp) << "\n";
+    std::cout << "getGPout: " << pxd_getGPOut(cameraUnitmap,gp) << "\n";
+
+//    XCLIB_API_CALL( pxd_setGPIn(cameraUnitmap,0), "setGPIn");
+//    std::cout << "getGPin: " << pxd_getGPIn(cameraUnitmap,gp) << "\n";
+
+//    std::thread tt(&EagleCamera::snap,this);
+//    tt.detach();
 
 //    XCLIB_API_CALL( pxd_goLivePair(cameraUnitmap,1,2), "pxd_goLivePair" );
 
+
+    XCLIB_API_CALL( pxd_goSnap(cameraUnitmap,1), "pxd_goSnap" );
+
+    setTriggerRegister(0x0);
     setTriggerRegister(bits); // snapshot
 
-//    std::cout << "GP counts: " << pxd_getGPTrigger(cameraUnitmap,1) << "\n";
+    cameralink_handler.exec({0x54});
+
+//    XCLIB_API_CALL( pxd_goSnap(cameraUnitmap,1), "pxd_goSnap" );
+
 
 //    unsigned char rr;
 //    rr = getTriggerRegister();
@@ -335,6 +364,7 @@ void EagleCamera::startExposure()
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         i = pxd_capturedBuffer(cameraUnitmap);
+//        std::cout << "fields: " << pxd_capturedFieldCount(cameraUnitmap) << "\n";
     }
 
 
@@ -343,16 +373,22 @@ void EagleCamera::startExposure()
     if ( i ) {
         std::cout << "read ...\n";
         char col[] = "GRAY";
-        XCLIB_API_CALL( pxd_readushort(cameraUnitmap, 1, 0,0,2,2, buff, N, col), "pxd_readushort");
+        int xs = 100;
+        int ys = 100;
+        XCLIB_API_CALL( pxd_readushort(cameraUnitmap, 1, xs,ys,xs+2,ys+2, buff, N, col), "pxd_readushort");
     } else {
         std::cout << "no buffers!\n";
     }
-    std::cout << "field counts: " << pxd_capturedFieldCount(cameraUnitmap) << "\n";
+    std::cout << "field counts: " << pxd_buffersFieldCount(cameraUnitmap,i) << "\n";
 
     std::cout << "\nPIXELS:\n";
     for (size_t i=0; i < N; ++i ) {
-        std::cout << buff[i] << "\n";
+        printf("%u\n",buff[i]);
+//        std::cout << buff[i] << "\n";
     }
+
+    std::cout << "GP counts: " << pxd_getGPTrigger(cameraUnitmap,1) << "\n";
+    std::cout << "CCGP get: " << pxd_getCameraLinkCCOut(cameraUnitmap,0) << "\n";
 
 //    rr = getTriggerRegister();
 //    std::cout << "TRIGGER REGS: " << (int)rr << ", " << (int)bits << "\n";
@@ -433,7 +469,10 @@ void EagleCamera::setBinning(const uint8_t xbin, const uint8_t ybin)
     }
 
     CameraLinkHandler::byte_array_t addr = {0xA1, 0xA2};
-    CameraLinkHandler::byte_array_t vals = {xbin, ybin};
+    unsigned char xx = xbin-1;
+    unsigned char yy = ybin-1;
+
+    CameraLinkHandler::byte_array_t vals = {xx, yy};
     writeContinuousRegisters(addr,vals);
 }
 
@@ -445,8 +484,8 @@ void EagleCamera::getBinning(uint8_t *xbin, uint8_t *ybin)
     CameraLinkHandler::byte_array_t addr = {0xA1, 0xA2};
     CameraLinkHandler::byte_array_t vals = readContinuousRegisters(addr);
 
-    if ( xbin ) *xbin = vals[0];
-    if ( ybin ) *ybin = vals[1];
+    if ( xbin ) *xbin = vals[0]+1;
+    if ( ybin ) *ybin = vals[1]+1;
 }
 
 
@@ -482,7 +521,10 @@ void EagleCamera::setROI(const uint16_t xstart, const uint16_t ystart, const uin
     CameraLinkHandler::byte_array_t addr = {0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB};
     CameraLinkHandler::byte_array_t bytes(addr.size());
 
-    std::vector<uint16_t> values = {xsize, xstart, ysize, ystart};
+    uint16_t xx = xstart-1;
+    uint16_t yy = ystart-1;
+
+    std::vector<uint16_t> values = {xsize, xx, ysize, yy};
 
     size_t i = 0;
     for ( auto val: values ) {
@@ -505,7 +547,7 @@ void EagleCamera::getROI(uint16_t *xstart, uint16_t *ystart, uint16_t *width, ui
     }
 
     if ( xstart ) {
-        *xstart = ((value[2] & 0x0F) << 8) + value[3];
+        *xstart = ((value[2] & 0x0F) << 8) + value[3] + 1;
     }
 
     if ( height ) {
@@ -513,7 +555,7 @@ void EagleCamera::getROI(uint16_t *xstart, uint16_t *ystart, uint16_t *width, ui
     }
 
     if ( ystart ) {
-        *ystart = ((value[6] & 0x0F) << 8) + value[7];
+        *ystart = ((value[6] & 0x0F) << 8) + value[7] + 1;
     }
 }
 
@@ -781,12 +823,13 @@ void EagleCamera::setFrameRate(const double rate)
     size_t N = 5;
     CameraLinkHandler::byte_array_t value(N);
 
-    uint16_t counts = static_cast<uint16_t>(ceil(rate/2.5E-8));
+    uint64_t counts = static_cast<uint64_t>(ceil(4.0E7/rate));
 
     for ( size_t i = 1; i <= N ; ++i ) {
         value[N-i] = (counts & 0xFF);
         counts >>= 8;
     }
+
     writeContinuousRegisters(addr, value);
 
     // set Exp time according to Framerate
@@ -808,7 +851,7 @@ double EagleCamera::getFrameRate()
         counts |= value[i];
     }
 
-    return 2.5E-8*counts;
+    return 4.0E7/counts;
 }
 
 
@@ -917,6 +960,9 @@ void EagleCamera::setInitialState()
     setShutterState(currentShutterState);
 
     setTriggerRegister(0x0); // clear all bits. IDLE mode
+
+    setBinning(1,1);
+    setROI(1,1,EAGLE_CAMERA_CCD_WIDTH,EAGLE_CAMERA_CCD_HEIGHT);
 }
 
 
@@ -1014,7 +1060,7 @@ void EagleCamera::getManufacturerData()
     DAC_LinearCoeffs[1] = (DAC_Calibration[1] - DAC_Calibration[0])/(DAC_CALIBRATION_POINT_2 - DAC_CALIBRATION_POINT_1);
     DAC_LinearCoeffs[0] = DAC_Calibration[0] - DAC_LinearCoeffs[1]*DAC_CALIBRATION_POINT_1;
 
-    cameralink_handler.setSystemState(true,true,false,false); // clear FPGA_EPROM_COMMS bit
+    cameralink_handler.setSystemState(CL_DEFAULT_CK_SUM_ENABLED,CL_DEFAULT_ACK_ENABLED,false,false); // clear FPGA_EPROM_COMMS bit
 }
 
 

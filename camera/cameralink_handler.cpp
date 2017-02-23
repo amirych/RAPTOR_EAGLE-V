@@ -18,7 +18,7 @@ CameraLinkHandler::CameraLinkHandler(const int unitmap):
     lastXCLibError(0), lastControllerError(CL_ETX),
     ACK_Bit(CL_DEFAULT_ACK_ENABLED), CK_SUM_Bit(CL_DEFAULT_CK_SUM_ENABLED),
     FPGAinRST_Bit(true), FPGA_EPROM_Bit(false),
-    currentSystemState(0x56),
+    currentSystemState(0x2),
     logFunc(nullptr)
 {
     // set buffers in correct initial state
@@ -380,6 +380,7 @@ int CameraLinkHandler::reset(const long timeout)
 int CameraLinkHandler::setSystemState(const bool ck_sum_bit, const bool ack_bit,
                                       const bool fpga_in_reset, const bool fpga_eprom)
 {
+    currentSystemState = 0;
     if ( !fpga_in_reset ) currentSystemState |= CL_SYSTEM_STATE_FPGA_RST_HOLD; // 0 - reset, 1 - no reset
     if ( ck_sum_bit ) currentSystemState |= CL_SYSTEM_STATE_CK_SUM;
     if ( ack_bit ) currentSystemState |= CL_SYSTEM_STATE_ACK;
@@ -393,7 +394,8 @@ int CameraLinkHandler::setSystemState(const bool ck_sum_bit, const bool ack_bit,
     byte_array_t comm = {0x4F, currentSystemState};
     byte_array_t ans; // expect as answer only ACK + Chk_Sum
 
-    exec(comm, ans, CL_DEFAULT_TIMEOUT);
+//    exec(comm, ans, CL_DEFAULT_TIMEOUT);
+    exec(comm);
 
     return lastXCLibError;
 }
