@@ -91,7 +91,7 @@ public:
     void stopExposure();
 
 
-    void setExposure(const double exp_time);
+    void setExposure(const double exp_time); // in secs
     double getExposure();
 
     void setBinning(const uint8_t xbin, const uint8_t ybin);
@@ -118,6 +118,9 @@ public:
 
     void setShutterState(const EagleCamera::ShutterState state);
     EagleCamera::ShutterState getShutterState();
+
+    void setShutterDelay(const double open_delay, const double close_delay); // in msecs
+    void getShutterDelay(double *open_delay, double *close_delay); // in msecs
 
     void setReadoutMode(const EagleCamera::ReadoutMode mode);
     EagleCamera::ReadoutMode getReadoutMode();

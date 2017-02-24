@@ -186,8 +186,14 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Set camera unitmap ...", 2);
         cameralink_handler.setUnitmap(cameraUnitmap);
 
-//        cameralink_handler.reset();
+        cameralink_handler.reset(60000);
+        cameralink_handler.exec({0x54});
 
+        CameraLinkHandler::byte_array_t b(2);
+        for (int i = 0; i < 3; ++i) cameralink_handler.exec({0x53,0xE0,0x01,0x09});
+        CameraLinkHandler::byte_array_t b1(1);
+        cameralink_handler.exec(CL_COMMAND_READ_VALUE,b1);
+        printf("GOT: %#x\n", (int)b1[0]);
 
 
         // setup camera to default state
@@ -318,9 +324,9 @@ void EagleCamera::startExposure()
     std::cout << "FieldCount: " << pxd_buffersFieldCount(cameraUnitmap,1) << "\n";
     std::cout << "field counts: " << pxd_capturedFieldCount(cameraUnitmap) << "\n";
 
-    int gp = 0;
-    std::cout << "getGPin: " << pxd_getGPIn(cameraUnitmap,gp) << "\n";
-    std::cout << "getGPout: " << pxd_getGPOut(cameraUnitmap,gp) << "\n";
+//    int gp = 0;
+//    std::cout << "getGPin: " << pxd_getGPIn(cameraUnitmap,gp) << "\n";
+//    std::cout << "getGPout: " << pxd_getGPOut(cameraUnitmap,gp) << "\n";
 
 //    XCLIB_API_CALL( pxd_setGPIn(cameraUnitmap,0), "setGPIn");
 //    std::cout << "getGPin: " << pxd_getGPIn(cameraUnitmap,gp) << "\n";
@@ -336,7 +342,7 @@ void EagleCamera::startExposure()
     setTriggerRegister(0x0);
     setTriggerRegister(bits); // snapshot
 
-    cameralink_handler.exec({0x54});
+//    cameralink_handler.exec({0x54});
 
 //    XCLIB_API_CALL( pxd_goSnap(cameraUnitmap,1), "pxd_goSnap" );
 
@@ -771,6 +777,49 @@ EagleCamera::ShutterState EagleCamera::getShutterState()
 }
 
 
+
+void EagleCamera::setShutterDelay(const double open_delay, const double close_delay)
+{
+    CameraLinkHandler::byte_array_t comm = CL_COMMAND_WRITE_VALUE;
+
+    comm[3] = 0xA6;
+    uint8_t counts = static_cast<uint8_t>(ceil(open_delay / 1.6384));
+    comm[4] = counts;
+    cameralink_handler.exec(comm);
+
+    comm[3] = 0xA7;
+    counts = static_cast<uint8_t>(ceil(close_delay / 1.6384));
+    comm[4] = counts;
+    cameralink_handler.exec(comm);
+}
+
+
+void EagleCamera::getShutterDelay(double *open_delay, double *close_delay)
+{
+    if ( !open_delay && !close_delay ) return;
+
+    CameraLinkHandler::byte_array_t comm_addr = CL_COMMAND_SET_ADDRESS;
+    CameraLinkHandler::byte_array_t comm = CL_COMMAND_READ_VALUE;
+    CameraLinkHandler::byte_array_t value(1);
+
+    if ( open_delay ) {
+        comm_addr[3] = 0xA6;
+        cameralink_handler.exec(comm_addr);
+        cameralink_handler.exec(comm,value);
+
+        *open_delay = value[0]*1.6384;
+    }
+
+    if ( close_delay ) {
+        comm_addr[3] = 0xA7;
+        cameralink_handler.exec(comm_addr);
+        cameralink_handler.exec(comm,value);
+
+        *close_delay = value[0]*1.6384;
+    }
+}
+
+
 void EagleCamera::setReadoutMode(const EagleCamera::ReadoutMode mode)
 {
     CameraLinkHandler::byte_array_t comm = CL_COMMAND_WRITE_VALUE;
@@ -963,6 +1012,8 @@ void EagleCamera::setInitialState()
 
     setBinning(1,1);
     setROI(1,1,EAGLE_CAMERA_CCD_WIDTH,EAGLE_CAMERA_CCD_HEIGHT);
+
+    setShutterDelay(20.0, 50.0);
 }
 
 

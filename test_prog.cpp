@@ -10,8 +10,8 @@ int main(int argc, char* argv[])
 {
 
     try {
-            EagleCamera cam;
-//        EagleCamera cam("/home/timur/raptor_eagle-v.fmt");
+//            EagleCamera cam;
+        EagleCamera cam("/home/timur/raptor_eagle-v.fmt");
 //        EagleCamera cam("/home/timur/zz");
 
         if ( argc > 1 ) cam.setLogLevel(EagleCamera::LOG_LEVEL_ERROR);
@@ -42,12 +42,11 @@ int main(int argc, char* argv[])
         std::cout << "\n\ntemp: " << cam.getCCD_Temperature() << "\n";
         std::cout << "TEC PCB temp: " << cam.getPCB_Temperature() << "\n";
 
-        cam.setShutterState(EagleCamera::ShutterExp);
         cam.startExposure();
 
         cam.stopExposure();
-        puts("GET SHUTTER:");
-        std::cout << "shutter: " << cam.getShutterState() << "\n";
+//        puts("GET SHUTTER:");
+//        std::cout << "shutter: " << cam.getShutterState() << "\n";
 
     } catch (EagleCamera_Exception &ex) {
         cout << "Eagle EXP: " << ex.what() << endl;

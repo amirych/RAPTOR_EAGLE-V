@@ -343,23 +343,41 @@ int CameraLinkHandler::reset(const long timeout)
 
     byte_array_t cmd  = {0x55, 0x99, 0x66, 0x11}; // reset micro
 
-    write(cmd); // there is no camera response for this command!!!
+//    write(cmd); // there is no camera response for this command!!!
 
-    byte_array_t msg = {0x4F, 0x50};  // set 'FPGA in RST' bit to 0 (reset). also set ACK and CK_SUM bits
+//    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
 
-    setSystemState(CL_DEFAULT_CK_SUM_ENABLED,CL_DEFAULT_ACK_ENABLED,false,false);
-    size_t n_ret = 0;
+    byte_array_t msg = {0x4F, 0x52};  // set 'FPGA in RST' bit to 0 (reset). also set ACK and CK_SUM bits
+
+    byte_array_t msg1 = {0x49};
+
+//    setSystemState(CL_DEFAULT_CK_SUM_ENABLED,CL_DEFAULT_ACK_ENABLED,false,false);
+//    size_t n_ret = 0;
+    size_t n_ret = 1;
     if ( ACK_Bit ) ++n_ret;
     if ( CK_SUM_Bit ) ++n_ret;
 
     auto start = std::chrono::system_clock::now();
 
-    while ( lastXCLibError < n_ret ) { // poll camera with 'msg' and wait for camera response bytes in Rx-buffer
+    byte_array_t bb(1);
+
+    std::cout << "RESET:\n";
+    exec(msg);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+    for (;;) {
+//        while ( lastXCLibError < n_ret ) { // poll camera with 'msg' and wait for camera response bytes in Rx-buffer
                                        // (according to Raptor Eagle-V 4240 Instruction manual) ...
-        write(msg);
+//        exec(msg);
+        exec(msg1,bb);
+        if ( bb[0] & CL_SYSTEM_STATE_FPGA_BOOT_OK ) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-        lastXCLibError = read(cam_msg, -1);
+//        lastXCLibError = read(cam_msg, -1);
+//        if ( !lastXCLibError ) {
+//            byte_array_t zz(lastXCLibError);
+//            lastXCLibError = read(zz);
+//            if ( zz[0] & CL_SYSTEM_STATE_FPGA_BOOT_OK ) break;
+//        }
 
         auto end = std::chrono::system_clock::now();
         std::chrono::duration<double> diff = end-start;
@@ -368,9 +386,10 @@ int CameraLinkHandler::reset(const long timeout)
             throw XCLIB_Exception(lastXCLibError = PXERTIMEOUT, log_str_timeout);
         }
     }
-    if ( n_ret ) lastXCLibError = read(cam_msg); // read response
-    else std::this_thread::sleep_for(std::chrono::milliseconds(1500)); // just sleep to ensure micro rebooted
+//    if ( n_ret ) lastXCLibError = read(cam_msg); // read response
+//    else std::this_thread::sleep_for(std::chrono::milliseconds(1500)); // just sleep to ensure micro rebooted
 
+    std::cout << "END RESET:\n";
     getMode();
 
     return lastXCLibError;
