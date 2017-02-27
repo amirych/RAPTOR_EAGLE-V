@@ -25,6 +25,7 @@
 #include <string>
 #include <exception>
 #include <cstdint>
+#include <memory>
 
 #include <export_decl.h>
 #include <cameralink_handler.h>
@@ -173,7 +174,11 @@ protected:
     std::string _microVersion;
     std::string _FPGA_Version;
 
-    void snap(){std::cout << "doSnap = " << pxd_doSnap(cameraUnitmap,1,10000) << "\n";}
+    std::unique_ptr<ushort[]> imageBuffer;
+
+//    void snap(){std::cout << "doSnap = " << pxd_doSnap(cameraUnitmap,1,10000) << "\n";}
+
+    void capturingImage(const double timeout);
 
     void logXCLibCall(const std::string &log_str);
 

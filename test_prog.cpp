@@ -17,8 +17,10 @@ int main(int argc, char* argv[])
         if ( argc > 1 ) cam.setLogLevel(EagleCamera::LOG_LEVEL_ERROR);
         cam.initCamera(1, &std::cout);
 
+        cam.enableTEC(false);
+
         cam.setFrameRate(1.0);
-        double texp = 1.0;
+        double texp = 3.0;
 //        texp = 7.777;
         std::cout << "\n\nSET EXP: " << texp << "\n";
         cam.setExposure(texp);
@@ -39,14 +41,26 @@ int main(int argc, char* argv[])
 //        }
 //        std::cout << "TEC set point: " << cam.getTEC_SetPoint() << "\n";
 //        cam.enableTEC(false);
-        std::cout << "\n\ntemp: " << cam.getCCD_Temperature() << "\n";
-        std::cout << "TEC PCB temp: " << cam.getPCB_Temperature() << "\n";
+//        std::cout << "\n\ntemp: " << cam.getCCD_Temperature() << "\n";
+//        std::cout << "TEC PCB temp: " << cam.getPCB_Temperature() << "\n";
 
+//        cam.setShutterState(EagleCamera::ShutterExp);
         cam.startExposure();
 
         cam.stopExposure();
 //        puts("GET SHUTTER:");
 //        std::cout << "shutter: " << cam.getShutterState() << "\n";
+        uint16_t xs,xe,ys,ye;
+        uint8_t xbin,ybin;
+
+        cam.getROI(&xs, &ys, &xe, &ye);
+        std::cout << "ROI: [" << xs << ", " << ys << ", " << xe << ", " << ye << "]\n";
+
+        cam.getBinning(&xbin, &ybin);
+        std::cout << "BIN: " << (int)xbin << ", " << (int)ybin << "\n";
+
+        std::cout << "TEC STATE: " << cam.isTECEnabled() << "\n";
+        std::this_thread::sleep_for(std::chrono::seconds(12));
 
     } catch (EagleCamera_Exception &ex) {
         cout << "Eagle EXP: " << ex.what() << endl;

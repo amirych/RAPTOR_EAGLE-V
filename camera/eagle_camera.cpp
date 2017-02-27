@@ -186,28 +186,13 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Set camera unitmap ...", 2);
         cameralink_handler.setUnitmap(cameraUnitmap);
 
-        cameralink_handler.reset(60000);
-        cameralink_handler.exec({0x54});
-
-        CameraLinkHandler::byte_array_t b(2);
-        for (int i = 0; i < 3; ++i) cameralink_handler.exec({0x53,0xE0,0x01,0x09});
-        CameraLinkHandler::byte_array_t b1(1);
-        cameralink_handler.exec(CL_COMMAND_READ_VALUE,b1);
-        printf("GOT: %#x\n", (int)b1[0]);
+        cameralink_handler.reset();
 
 
         // setup camera to default state
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "Set default system state ...", 2);
         cameralink_handler.setSystemState(CL_DEFAULT_CK_SUM_ENABLED,CL_DEFAULT_ACK_ENABLED,false,false);
 
-//        CameraLinkHandler::byte_array_t b(2);
-//        for (int i = 0; i < 3; ++i) cameralink_handler.exec({0x53,0xE0,0x01,0x09});
-//        CameraLinkHandler::byte_array_t b1(1);
-//        cameralink_handler.exec(CL_COMMAND_READ_VALUE,b1);
-//        printf("GOT: %#x\n", (int)b1[0]);
-
-//        cameralink_handler.exec({0x56},b);
-//        printf("GOT: %#x %#x\n",b[0],b[1]);
 
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "CameraLink serial connection is established", 1);
 
@@ -238,6 +223,8 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
         log_str = "pxd__imageCdim()";
         XCLIB_API_CALL( cc = pxd_imageCdim(), log_str );
 
+        imageBuffer = std::unique_ptr<ushort[]>(new ushort[xdim*ydim]);
+
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "CCD dimensions: [" +
                   std::to_string(xdim) + ", " + std::to_string(xdim) + "] pixels", ntab);
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "CCD bits per pixel: " + std::to_string(cc*bits), ntab);
@@ -252,6 +239,7 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
 
 
         setInitialState();
+//        return true;
 
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, "TRIGGER STATE: IDLE", ntab);
 
@@ -278,6 +266,10 @@ bool EagleCamera::initCamera(const int unitmap, std::ostream *log_file)
             log_str += "UNKNOWN STATE!";
             break;
         }
+        logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, log_str, ntab);
+
+        log_str = "TEC STATE: ";
+        if ( isTECEnabled() ) log_str += "ON"; else log_str += "OFF";
         logToFile(EagleCamera::LOG_IDENT_CAMERA_INFO, log_str, ntab);
 
     } catch ( XCLIB_Exception &ex ) {
@@ -309,96 +301,60 @@ void EagleCamera::startExposure()
 //    unsigned char bits = getTriggerRegister();
     unsigned char bits = 0;
     bits |= CL_TRIGGER_MODE_SNAPSHOT;
-//    bits |= CL_TRIGGER_MODE_FIXED_FRAME_RATE;
-//    bits |= CL_TRIGGER_MODE_CONTINUOUS_SEQ;
 
-
-//    XCLIB_API_CALL( pxd_goAbortLive(cameraUnitmap), "pxd_goAbortLive" );
-//    XCLIB_API_CALL( pxd_goSnap(cameraUnitmap,1), "pxd_goSnap" );
-//    XCLIB_API_CALL( pxd_goLive(cameraUnitmap,1), "pxd_goLive" );
-
-//    XCLIB_API_CALL( pxd_doSnap(cameraUnitmap,1,10000), "pxd_doSnap" );
-
-//    pxd_setCameraLinkCCOut(cameraUnitmap,0);
 
     std::cout << "FieldCount: " << pxd_buffersFieldCount(cameraUnitmap,1) << "\n";
     std::cout << "field counts: " << pxd_capturedFieldCount(cameraUnitmap) << "\n";
 
-//    int gp = 0;
-//    std::cout << "getGPin: " << pxd_getGPIn(cameraUnitmap,gp) << "\n";
-//    std::cout << "getGPout: " << pxd_getGPOut(cameraUnitmap,gp) << "\n";
-
-//    XCLIB_API_CALL( pxd_setGPIn(cameraUnitmap,0), "setGPIn");
-//    std::cout << "getGPin: " << pxd_getGPIn(cameraUnitmap,gp) << "\n";
-
-//    std::thread tt(&EagleCamera::snap,this);
-//    tt.detach();
-
-//    XCLIB_API_CALL( pxd_goLivePair(cameraUnitmap,1,2), "pxd_goLivePair" );
-
-
-    XCLIB_API_CALL( pxd_goSnap(cameraUnitmap,1), "pxd_goSnap" );
-
-    setTriggerRegister(0x0);
-    setTriggerRegister(bits); // snapshot
-
-//    cameralink_handler.exec({0x54});
-
 //    XCLIB_API_CALL( pxd_goSnap(cameraUnitmap,1), "pxd_goSnap" );
 
+    double texp = getExposure();
 
-//    unsigned char rr;
-//    rr = getTriggerRegister();
-//    std::cout << "TRIGGER REGS: " << (int)rr << ", " << (int)bits << "\n";
+    std::thread capThread(&EagleCamera::capturingImage, this, (texp + 5.0)*1000);
+    capThread.detach();
 
-//    XCLIB_API_CALL( pxd_doSnap(cameraUnitmap,1,10000), "pxd_doSnap" );
+    setTriggerRegister(0x0);
+    setTriggerRegister(bits); // snapshot. Start an exposure ...
 
-    size_t N = 9;
-    ushort buff[N];
-    memset(buff,0,sizeof(buff));
+//    size_t N = 9;
+//    ushort buff[N];
+//    memset(buff,0,sizeof(buff));
 
-    auto start = std::chrono::system_clock::now();
+//    auto start = std::chrono::system_clock::now();
 
 
-    int i = pxd_capturedBuffer(cameraUnitmap);
-    while ( !i ) {
-        auto end = std::chrono::system_clock::now();
-        std::chrono::duration<double> diff = end-start;
-        if ( std::chrono::duration_cast<std::chrono::seconds>(diff).count() >=
-             std::chrono::seconds(10).count() ) {
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        i = pxd_capturedBuffer(cameraUnitmap);
+//    int i = pxd_capturedBuffer(cameraUnitmap);
+//    while ( !i ) {
+//        auto end = std::chrono::system_clock::now();
+//        std::chrono::duration<double> diff = end-start;
+//        if ( std::chrono::duration_cast<std::chrono::seconds>(diff).count() >=
+//             std::chrono::seconds(10).count() ) {
+//            break;
+//        }
+//        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+//        i = pxd_capturedBuffer(cameraUnitmap);
 //        std::cout << "fields: " << pxd_capturedFieldCount(cameraUnitmap) << "\n";
-    }
+//    }
 
 
-    std::cout << "captured: " << i << "\n";
+//    std::cout << "captured: " << i << "\n";
 
-    if ( i ) {
-        std::cout << "read ...\n";
-        char col[] = "GRAY";
-        int xs = 100;
-        int ys = 100;
-        XCLIB_API_CALL( pxd_readushort(cameraUnitmap, 1, xs,ys,xs+2,ys+2, buff, N, col), "pxd_readushort");
-    } else {
-        std::cout << "no buffers!\n";
-    }
-    std::cout << "field counts: " << pxd_buffersFieldCount(cameraUnitmap,i) << "\n";
+//    if ( i ) {
+//        std::cout << "read ...\n";
+//        char col[] = "GRAY";
+//        int xs = 100;
+//        int ys = 100;
+//        XCLIB_API_CALL( pxd_readushort(cameraUnitmap, 1, xs,ys,xs+2,ys+2, buff, N, col), "pxd_readushort");
+//    } else {
+//        std::cout << "no buffers!\n";
+//    }
+//    std::cout << "field counts: " << pxd_buffersFieldCount(cameraUnitmap,i) << "\n";
 
-    std::cout << "\nPIXELS:\n";
-    for (size_t i=0; i < N; ++i ) {
-        printf("%u\n",buff[i]);
-//        std::cout << buff[i] << "\n";
-    }
-
-    std::cout << "GP counts: " << pxd_getGPTrigger(cameraUnitmap,1) << "\n";
-    std::cout << "CCGP get: " << pxd_getCameraLinkCCOut(cameraUnitmap,0) << "\n";
-
-//    rr = getTriggerRegister();
-//    std::cout << "TRIGGER REGS: " << (int)rr << ", " << (int)bits << "\n";
-
+//    std::cout << "\nPIXELS:\n";
+//    for (size_t i=0; i < N; ++i ) {
+//        printf("%u\n",buff[i]);
+////        std::cout << buff[i] << "\n";
+//    }
 }
 
 
@@ -536,6 +492,7 @@ void EagleCamera::setROI(const uint16_t xstart, const uint16_t ystart, const uin
     for ( auto val: values ) {
         bytes[2*i] = (val & 0x0F00) >> 8; // MM
         bytes[2*i+1] = val & 0xFF;        // LL
+        ++i;
     }
 
     writeContinuousRegisters(addr, bytes);
@@ -557,7 +514,7 @@ void EagleCamera::getROI(uint16_t *xstart, uint16_t *ystart, uint16_t *width, ui
     }
 
     if ( height ) {
-        *width = ((value[4] & 0x0F) << 8) + value[5];
+        *height = ((value[4] & 0x0F) << 8) + value[5];
     }
 
     if ( ystart ) {
@@ -607,20 +564,28 @@ void EagleCamera::setGain(const EagleCamera::PreAmpGain gain)
 
     unsigned char ctrlReg = getCtrlRegister();
 
-    switch (gain) {
-    case EagleCamera::HighGain:
-        ctrlReg &= (0xFF ^ CL_FPGA_CTRL_REG_HIGH_GAIN);
-        break;
-    case EagleCamera::LowGain:
-        ctrlReg |= CL_FPGA_CTRL_REG_HIGH_GAIN;
-        break;
-    default:
-        std::string log_str = "Bad value for PreAmp gain!";
-        throw EagleCamera_Exception(EagleCamera::ERROR_BAD_PARAM,log_str);
-        break;
-    }
+    comm[4] = 0x0;
 
-    comm[4] = ctrlReg;
+    if ( ctrlReg & CL_FPGA_CTRL_REG_ENABLE_TEC ) comm[4] |= CL_FPGA_CTRL_REG_ENABLE_TEC;
+
+    if ( gain == EagleCamera::LowGain ) comm[4] |= CL_FPGA_CTRL_REG_HIGH_GAIN;
+
+//printf("CTRL_REG: %#x\n",ctrlReg);
+//    switch (gain) {
+//    case EagleCamera::HighGain:
+//        ctrlReg &= ~CL_FPGA_CTRL_REG_HIGH_GAIN;
+//        break;
+//    case EagleCamera::LowGain:
+//        ctrlReg |= CL_FPGA_CTRL_REG_HIGH_GAIN;
+//        break;
+//    default:
+//        std::string log_str = "Bad value for PreAmp gain!";
+//        throw EagleCamera_Exception(EagleCamera::ERROR_BAD_PARAM,log_str);
+//        break;
+//    }
+
+//    comm[4] = ctrlReg;
+//    printf("CTRL_REG: %#x\n",ctrlReg);
 
     cameralink_handler.exec(comm);
 }
@@ -641,18 +606,15 @@ void EagleCamera::enableTEC(const bool flag)
     CameraLinkHandler::byte_array_t comm = CL_COMMAND_WRITE_VALUE;
 
     unsigned char ctrlReg = getCtrlRegister();
-    bool isEnabled = ctrlReg & CL_FPGA_CTRL_REG_ENABLE_TEC;
 
-    if ( flag ) {
-        if ( !isEnabled ) { // turn on
-            ctrlReg |= CL_FPGA_CTRL_REG_ENABLE_TEC;
-        }
-    } else {
-        if ( isEnabled ) { // turn off
-            ctrlReg ^= CL_FPGA_CTRL_REG_ENABLE_TEC;
-        }
+    printf("ENABLE TEC: %#x\n",ctrlReg);
+    if ( flag ) { // turn on
+        ctrlReg |= CL_FPGA_CTRL_REG_ENABLE_TEC;
+    } else { // turn off
+        ctrlReg &= ~CL_FPGA_CTRL_REG_ENABLE_TEC;
     }
 
+    printf("ENABLE TEC: %#x\n",ctrlReg);
     comm[4] = ctrlReg;;
     cameralink_handler.exec(comm);
 }
@@ -661,6 +623,7 @@ void EagleCamera::enableTEC(const bool flag)
 bool EagleCamera::isTECEnabled()
 {
     unsigned char ctrlReg = getCtrlRegister();
+    printf("CTRL REG: %#x\n",ctrlReg);
     return ctrlReg & CL_FPGA_CTRL_REG_ENABLE_TEC;
 }
 
@@ -1010,8 +973,7 @@ void EagleCamera::setInitialState()
 
     setTriggerRegister(0x0); // clear all bits. IDLE mode
 
-    setBinning(1,1);
-    setROI(1,1,EAGLE_CAMERA_CCD_WIDTH,EAGLE_CAMERA_CCD_HEIGHT);
+//    enableTEC(true);
 
     setShutterDelay(20.0, 50.0);
 }
@@ -1177,3 +1139,28 @@ void EagleCamera::logXCLibCall(const std::string &log_str)
 }
 
 
+
+void EagleCamera::capturingImage(const double timeout)
+{
+    std::string log_str;
+
+    try {
+        log_str = "pxd_doSnap(" + std::to_string(cameraUnitmap) + ", 1, " + std::to_string(timeout) + ")";
+
+        XCLIB_API_CALL( pxd_doSnap(cameraUnitmap,1,timeout), log_str ); // wait for capturing event ...
+
+        uint16_t xstart, width, ystart, height;
+        char col[] = "GRAY";
+        ushort *buff = imageBuffer.get();
+
+        getROI(&xstart, &ystart, &width, &height);
+        size_t Nelem = width*height;
+
+        XCLIB_API_CALL( pxd_readushort(cameraUnitmap, 1, xstart, ystart, width, height, buff, Nelem, col), "pxd_readushort");
+
+        size_t N = 1000;
+        for (int i = 0; i < 20; ++i ) std::cout << "PIXEL: " << buff[N + i] << "\n";
+    } catch (XCLIB_Exception &ex) {
+        logToFile(ex);
+    }
+}
